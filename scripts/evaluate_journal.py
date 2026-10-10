@@ -2,8 +2,11 @@
 
 用法：python scripts/evaluate_journal.py [--journal journal/research_log.csv]
 
-对每条已填 decision 的记录，从信号日次日开盘价算 5 / 20 / 60 个交易日后的收益，
-以及期间最大涨幅、最大回撤；按 decision 分组汇总。数据不够的天数显示为空。
+对每条记录，从信号日次日开盘价算 5 / 20 / 60 个交易日后的收益，以及期间最大涨幅、最大回撤。
+分三组汇总：
+- 规则全部信号：日志里的每一条，不管你填没填 decision（= 规则自己的前瞻表现）
+- 做 / 不做：你填了 decision 的记录（= 人工判断有没有增益）
+数据不够的天数显示为空。先跑一次 daily_scan.py --no-update 更新行情再评估。
 """
 from __future__ import annotations
 
@@ -46,16 +49,23 @@ def main():
         print("还没有研究日志：先跑 scripts/daily_scan.py，出现“可试仓”的票后会自动生成。")
         return
     j = pd.read_csv(a.journal)
-    j = j[j["decision"].notna() & (j["decision"].astype(str).str.strip() != "")]
     if j.empty:
-        print("日志里还没有填写 decision 的记录。")
+        print("日志是空的。")
         return
-    j["group"] = np.where(j["decision"].astype(str).str.strip() == "做", "做", "不做")
     res = pd.DataFrame([outcome(r.ticker, r.signal_date) for r in j.itertuples()], index=j.index)
     j = j.join(res)
+    dec = j["decision"].fillna("").astype(str).str.strip()
+    j["group"] = np.where(dec == "", "未填", np.where(dec == "做", "做", "不做"))
     cols = ["ret_5d", "ret_20d", "ret_60d", "max_gain_60d", "max_dd_60d"]
     pd.set_option("display.width", 200)
-    print(j.groupby("group")[cols].agg(["count", "mean", "median"]).round(3).to_string())
+    print("== 规则全部信号")
+    print(j[cols].agg(["count", "mean", "median"]).round(3).to_string())
+    filled = j[j["group"] != "未填"]
+    if filled.empty:
+        print("\n还没有填写 decision 的记录，无法比较人工判断。")
+    else:
+        print("\n== 按你的判断分组")
+        print(filled.groupby("group")[cols].agg(["count", "mean", "median"]).round(3).to_string())
     out = ROOT / "journal" / "evaluation.csv"
     j.to_csv(out, index=False)
     print(f"明细：{out}")

@@ -4,7 +4,10 @@
 - 每笔试仓承担账户 risk_per_trade 的风险（1R）。目标满仓资金 T = 1R 金额 / (试仓比例 × 止损幅度)，
   且不超过账户 max_position_pct；各笔成交（试仓、加仓、分批卖出、清仓）按 legs 等比例放大。
 - 同时持仓数 ≤ max_positions，每天新开试仓 ≤ max_new_per_day，现金不够就缩小或跳过。
-- 同一天信号多于名额时随机挑选；用多个随机种子重复，看结果分布。
+- 同一天信号多于名额时按 order 挑选：random（随机）、rs60_asc（60 日相对强度从低到高，先做涨得少的）、
+  gm_change_desc（毛利率提升多的优先）、rev_yoy_desc（营收增速高的优先）；缺值的排最后，同值随机。
+  用多个随机种子重复，看结果分布。
+- idle_asset=IWM：没用掉的现金按 IWM 每日收盘涨跌计息，相当于“平时持有指数，有信号时卖出指数去试仓”。
 - 每日按收盘价盯市算权益和回撤。成交价含滑点（买入 ×(1+s)，卖出 ×(1−s)）。
 """
 from __future__ import annotations
@@ -43,14 +46,29 @@ class PortfolioResult:
         }
 
 
+ORDERS = {"rs60_asc": ("rs60", True), "gm_change_desc": ("gm_change", False), "rev_yoy_desc": ("rev_yoy", False)}
+
+
 def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.DatetimeIndex,
-             pcfg: dict, probe_size: float, slippage: float, seed: int = 0) -> PortfolioResult:
+             pcfg: dict, probe_size: float, slippage: float, seed: int = 0,
+             idle_series: pd.Series | None = None) -> PortfolioResult:
     rng = np.random.default_rng(seed)
     t = trades.dropna(subset=["entry_date"]).copy()
     t["entry_date"] = pd.to_datetime(t["entry_date"])
     t["plegs"] = t["legs"].map(parse_legs)
     t["rnd"] = rng.random(len(t))
-    by_entry = {d: g.sort_values("rnd") for d, g in t.groupby("entry_date")}
+    order = pcfg.get("order", "random")
+    if order in ORDERS:
+        col, asc = ORDERS[order]
+        if col not in t:
+            raise ValueError(f"排序需要交易文件里有 {col} 列（回测时加 --features）")
+        t["key"] = t[col] if asc else -t[col]
+        t["key"] = t["key"].fillna(np.inf)
+        by_entry = {d: g.sort_values(["key", "rnd"]) for d, g in t.groupby("entry_date")}
+    else:
+        by_entry = {d: g.sort_values("rnd") for d, g in t.groupby("entry_date")}
+    idle = idle_series.reindex(calendar).ffill() if idle_series is not None else None
+    prev_idle = None
 
     cash = float(pcfg["initial_equity"])
     positions: dict[int, dict] = {}   # trade row id -> {ticker, shares, legs, scale}
@@ -62,6 +80,12 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
         return cash + sum(p["shares"] * last_close.get(p["ticker"], p["last_px"]) for p in positions.values())
 
     for day in calendar:
+        # 0) 闲置现金按指数涨跌计息（上一个收盘到今天收盘）
+        if idle is not None:
+            px_idle = idle.loc[day]
+            if prev_idle is not None and cash > 0 and px_idle > 0:
+                cash *= px_idle / prev_idle
+            prev_idle = px_idle
         # 1) 已有持仓在今天的成交（加仓 / 分批卖出 / 清仓），先卖后买
         todays = []
         for pid, p in positions.items():

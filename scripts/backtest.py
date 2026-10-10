@@ -39,6 +39,7 @@ _G = {}
 
 def _init(cfg, sh, fil, fund, want_features):
     _G["cfg"], _G["sh"], _G["fil"], _G["fund"], _G["feat"] = cfg, sh, fil, fund, want_features
+    _G["iwm"] = adjust(load_raw("IWM"))["Close"]
     m = cfg.get("market") or {}
     _G["mkt"] = market_filter(get_daily(m.get("ticker", "IWM")), cfg) if m.get("enabled") else None
 
@@ -56,13 +57,27 @@ def _work(row):
     if _G["fil"] is not None and fil is None:
         fil = _EMPTY
     ftab = fmod.company_table(_G["fund"], cik) if _G["fund"] is not None else None
-    efilter = make_entry_filter(_G["cfg"], fil, ftab)
+    efilter = make_entry_filter(_G["cfg"], fil, ftab, df["Close"], _G["iwm"])
     staged = trades_frame(run_ticker(t, df, s, _G["cfg"], "staged", stats, mkt, fil, efilter), _G["cfg"], "staged")
     imm = trades_frame(run_ticker(t, df, s, _G["cfg"], "immediate", None, mkt, fil), _G["cfg"], "immediate")
     if _G["feat"] and len(staged):
-        feats = [trade_features(fil, ftab, r.surge_date, r.signal_date) for r in staged.itertuples()]
+        feats = [{**trade_features(fil, ftab, r.surge_date, r.signal_date),
+                  **rel_strength(df["Close"], _G["iwm"], r.signal_date)} for r in staged.itertuples()]
         staged = pd.concat([staged, pd.DataFrame(feats, index=staged.index)], axis=1)
     return t, staged.to_dict("records"), imm.to_dict("records"), stats
+
+
+def rel_strength(close: pd.Series, bench: pd.Series, date) -> dict:
+    """试仓信号日的相对强度：个股 N 日涨幅 − IWM 同期涨幅。"""
+    out = {}
+    i = close.index.get_loc(pd.Timestamp(date))
+    b = bench.reindex(close.index).ffill()
+    for n in (20, 60):
+        if i >= n and b.iloc[i - n] > 0:
+            out[f"rs{n}"] = float(close.iloc[i] / close.iloc[i - n] - b.iloc[i] / b.iloc[i - n])
+        else:
+            out[f"rs{n}"] = np.nan
+    return out
 
 
 def parse_set(items):
@@ -124,8 +139,8 @@ def max_streak(b: pd.Series) -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v3.yaml"))
-    ap.add_argument("--tag", default="v3")
+    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v4.yaml"))
+    ap.add_argument("--tag", default="v4")
     ap.add_argument("--set", nargs="*")
     ap.add_argument("--tickers")
     ap.add_argument("--workers", type=int, default=4)
@@ -143,7 +158,7 @@ def main():
     flt = cfg.get("filters") or {}
     need_holders = ((flt.get("holders") or {}).get("require") or "none") != "none"
     need_fund = any((flt.get("fundamentals") or {}).get(k) not in (None, False)
-                    for k in ("min_runway_q", "min_rev_yoy", "require_accel"))
+                    for k in ("min_runway_q", "min_rev_yoy", "require_accel", "min_gm_change"))
     if (flt.get("offering") or {}).get("enabled") or args.catalyst or args.features or need_holders:
         f = filings.load()
         if f is None:

@@ -38,14 +38,14 @@ from alpha_breakout.universe import shares_history, shares_series  # noqa: E402
 
 JOURNAL = ROOT / "journal" / "research_log.csv"
 JOURNAL_COLS = ["scan_date", "ticker", "surge_date", "signal_date", "close", "rule_stop", "catalyst",
-                "new_13d", "amend_13d", "new_13g", "rev_yoy", "runway_q",
+                "new_13d", "amend_13d", "new_13g", "rev_yoy", "gm_change", "runway_q",
                 "decision", "reason", "notes"]
 _G = {}
 _EMPTY = pd.DataFrame(columns=["cik", "date", "form", "items"])
 
 
 def _init(cfg, sh, fil, fund):
-    _G.update(cfg=cfg, sh=sh, fil=fil, fund=fund)
+    _G.update(cfg=cfg, sh=sh, fil=fil, fund=fund, iwm=adjust(load_raw("IWM"))["Close"])
 
 
 def _state(row):
@@ -58,7 +58,8 @@ def _state(row):
     ftab = fmod.company_table(_G["fund"], cik) if _G["fund"] is not None else None
     st = {}
     run_ticker(t, df, shares_series(_G["sh"], cik, df.index), _G["cfg"], "staged",
-               filings=fil, entry_filter=make_entry_filter(_G["cfg"], fil, ftab), state_out=st)
+               filings=fil, entry_filter=make_entry_filter(_G["cfg"], fil, ftab, df["Close"], _G["iwm"]),
+               state_out=st)
     if st.get("state") in (None, "idle") and not st.get("surge_today"):
         return None
     tr = st.get("trade")
@@ -77,7 +78,7 @@ def _state(row):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v3.yaml"))
+    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v4.yaml"))
     ap.add_argument("--no-update", action="store_true")
     ap.add_argument("--equity", type=float, help="账户规模，用于计算建议股数；默认取配置 portfolio.initial_equity")
     ap.add_argument("--workers", type=int, default=4)
@@ -123,10 +124,26 @@ def _fmt_pct(x):
     return "—" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x:+.0%}"
 
 
+def _fmt_pt(x):
+    return "—" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 100:+.1f} 点"
+
+
 def _fmt_runway(x):
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "—"
     return "盈利" if np.isinf(x) else f"{x:.1f} 季"
+
+
+def _fund_rule(cfg) -> str:
+    fu = (cfg.get("filters") or {}).get("fundamentals") or {}
+    parts = []
+    if fu.get("min_rev_yoy") is not None:
+        parts.append(f"营收同比 ≥ {fu['min_rev_yoy']:.0%}")
+    if fu.get("min_gm_change") is not None:
+        parts.append(f"毛利率同比提升 ≥ {fu['min_gm_change'] * 100:.0f} 个点")
+    if fu.get("min_runway_q") is not None:
+        parts.append(f"现金跑道 ≥ {fu['min_runway_q']} 季")
+    return "基本面要求：" + ("、".join(parts) if parts else "无")
 
 
 def _fund_ok(r, cfg) -> str:
@@ -138,6 +155,9 @@ def _fund_ok(r, cfg) -> str:
     if fu.get("min_runway_q") is not None:
         v = getattr(r, "runway_q", np.nan)
         checks.append(None if pd.isna(v) else v >= fu["min_runway_q"])
+    if fu.get("min_gm_change") is not None:
+        v = getattr(r, "gm_change", np.nan)
+        checks.append(None if pd.isna(v) else v >= fu["min_gm_change"])
     if not checks:
         return "—"
     if any(c is False for c in checks):
@@ -164,8 +184,8 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     pcfg = cfg.get("portfolio") or {}
     risk_amt = equity * pcfg.get("risk_per_trade", 0.005)
     lines = [f"# 每日扫描 {day.date()}", "",
-             f"- 配置：v3（{cfg['surge']['one_day']['min_ret']:.0%} 单日放量或 {cfg['surge']['multi_day']['min_ret']:.0%} 五日涨幅入池；"
-             f"观察 {cfg['watch']['min_days']}–{cfg['watch']['max_days']} 天；创异动以来新高试仓 1/3）",
+             f"- 规则：{cfg['surge']['one_day']['min_ret']:.0%} 单日放量或 {cfg['surge']['multi_day']['min_ret']:.0%} 五日涨幅入池；"
+             f"观察 {cfg['watch']['min_days']}–{cfg['watch']['max_days']} 天；创异动以来新高试仓 1/3；{_fund_rule(cfg)}",
              f"- 账户 {equity:,.0f} 美元，每笔试仓风险 {risk_amt:,.0f} 美元（1R）",
              "- 价格为复权收盘价。规则只负责找票和管风险，做不做由你研究后决定，并记在 journal/research_log.csv。", ""]
 
@@ -176,16 +196,17 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     if sig.empty:
         lines += ["无", ""]
     else:
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 异动涨幅 | 规则止损 | 止损幅度 | 建议试仓股数 | 催化剂 | 13D新/改/13G | 营收同比 | 现金跑道 | 近期公告 |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 异动涨幅 | 规则止损 | 止损幅度 | 建议试仓股数 | 营收同比 | 毛利率变化 | 现金跑道 | 催化剂 | 13D新/改/13G | 近期公告 |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for r in sig.sort_values("ticker").itertuples():
             stop = max(r.low10, r.close * (1 - p["max_stop_pct"]))
             risk = (r.close - stop) / r.close
             shares = int(risk_amt / max(r.close - stop, 1e-9))
             lines.append(
                 f"| {r.ticker} | {r.close:.2f} | {pd.Timestamp(r.surge_date).date()} | {r.days_since_surge} | {r.surge_gain:+.0%} | "
-                f"{stop:.2f} | {risk:.0%} | {shares} | {r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} | "
-                f"{_fmt_pct(r.rev_yoy)} | {_fmt_runway(r.runway_q)} | {_recent_filings(fil, r.cik, pd.Timestamp(r.surge_date) - pd.Timedelta(days=10))} |")
+                f"{stop:.2f} | {risk:.0%} | {shares} | {_fmt_pct(r.rev_yoy)} | {_fmt_pt(r.gm_change)} | {_fmt_runway(r.runway_q)} | "
+                f"{r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} | "
+                f"{_recent_filings(fil, r.cik, pd.Timestamp(r.surge_date) - pd.Timedelta(days=10))} |")
         lines.append("")
         lines.append("止损按今天收盘估算（近 10 日最低点，最多 -15%）；实际以明天开盘价重新计算。")
         lines.append("")
@@ -220,15 +241,15 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     if not watch.empty:
         watch = watch.assign(dist=watch["close"] / watch["surge_high"] - 1).sort_values("dist", ascending=False)
         n_ok = sum(_fund_ok(r, cfg) == "✓" for r in watch.itertuples())
-        lines.insert(len(lines) - 1, f"基本面达标（营收同比、现金跑道）的有 {n_ok} 支，只有这些创新高时才会出现在“可试仓”里。")
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 距最高 | 距作废线 | 基本面 | 营收同比 | 现金跑道 | 催化剂 | 13D新/改/13G |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines.insert(len(lines) - 1, f"基本面达标（{_fund_rule(cfg)[6:]}）的有 {n_ok} 支，只有这些创新高时才会出现在“可试仓”里。")
+        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 距最高 | 距作废线 | 基本面 | 营收同比 | 毛利率变化 | 现金跑道 | 催化剂 | 13D新/改/13G |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         watch = watch.assign(fund_ok=[_fund_ok(r, cfg) for r in watch.itertuples()])
         watch = watch.sort_values(["fund_ok", "dist"], ascending=[False, False], key=lambda c: c.map({"✓": 2, "缺数据": 1, "✗": 0}) if c.name == "fund_ok" else c)
         for r in watch.itertuples():
             lines.append(f"| {r.ticker} | {r.close:.2f} | {pd.Timestamp(r.surge_date).date()} | {r.days_since_surge} | "
                          f"{r.dist:+.0%} | {r.close / r.pre_surge_close - 1:+.0%} | {r.fund_ok} | {_fmt_pct(r.rev_yoy)} | "
-                         f"{_fmt_runway(r.runway_q)} | {r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} |")
+                         f"{_fmt_pt(r.gm_change)} | {_fmt_runway(r.runway_q)} | {r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} |")
         lines.append("")
     path = out_dir / f"{day.date()}.md"
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -248,7 +269,7 @@ def _append_journal(sig: pd.DataFrame, day: pd.Timestamp, p: dict):
                      "signal_date": key[0], "close": round(r.close, 4),
                      "rule_stop": round(max(r.low10, r.close * (1 - p["max_stop_pct"])), 4),
                      "catalyst": r.catalyst, "new_13d": r.new_13d, "amend_13d": r.amend_13d, "new_13g": r.new_13g,
-                     "rev_yoy": r.rev_yoy, "runway_q": r.runway_q, "decision": "", "reason": "", "notes": ""})
+                     "rev_yoy": r.rev_yoy, "gm_change": r.gm_change, "runway_q": r.runway_q, "decision": "", "reason": "", "notes": ""})
     if rows:
         pd.concat([old, pd.DataFrame(rows)], ignore_index=True)[JOURNAL_COLS].to_csv(JOURNAL, index=False)
 

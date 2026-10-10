@@ -3,6 +3,7 @@
 每个概念、每个季度一次请求，得到全市场的值：
   营收（季度）：Revenues → RevenueFromContractWithCustomerExcludingAssessedTax → SalesRevenueNet，按优先级取
   净利润（季度）：NetIncomeLoss，亏损额作为“烧钱速度”的近似（含非现金项目，偏保守）
+  毛利（季度）：GrossProfit（很多公司不单独报，缺失较多）
   现金（时点）：CashAndCashEquivalentsAtCarryingValue（缺失时用含受限现金的口径）
               + 短期投资 / 可售证券（生物科技公司大量现金放在这里）
 
@@ -29,6 +30,7 @@ DURATION = {
     "rev_2": "RevenueFromContractWithCustomerExcludingAssessedTax",
     "rev_3": "SalesRevenueNet",
     "net_income": "NetIncomeLoss",
+    "gross_profit": "GrossProfit",
 }
 INSTANT = {
     "cash_1": "CashAndCashEquivalentsAtCarryingValue",
@@ -81,6 +83,7 @@ def company_table(df: pd.DataFrame, cik: int) -> pd.DataFrame:
     out = pd.DataFrame(index=w.index)
     out["revenue"] = _first(w, ["rev_1", "rev_2", "rev_3"])
     out["net_income"] = w.get("net_income")
+    out["gross_profit"] = w.get("gross_profit")
     cash = _first(w, ["cash_1", "cash_2"])
     sti = w[[c for c in ("sti_1", "sti_2", "sti_3") if c in w]].max(axis=1) if any(c in w for c in ("sti_1", "sti_2", "sti_3")) else 0.0
     out["cash_total"] = cash + (sti.fillna(0.0) if isinstance(sti, pd.Series) else 0.0)
@@ -102,11 +105,16 @@ def features_at(tab: pd.DataFrame, date) -> dict:
     rev_yoy        ：最近一个季度营收同比
     rev_yoy_prev   ：上一个季度的营收同比
     rev_accel      ：rev_yoy > rev_yoy_prev（营收增速加快）
+    revenue_q      ：最近季度营收（美元）
+    gross_margin   ：最近季度毛利率
+    gm_change      ：毛利率比去年同季度的变化（百分点，0.05 = 提高 5 个点）
+    ni_improve     ：最近季度净利润比去年同季度改善（亏损收窄或盈利增加）为 1
     runway_q       ：现金 / 季度亏损额（季度数）；盈利公司记为 inf
     profitable     ：最近季度净利润 > 0
     """
     nan = {"rev_yoy": np.nan, "rev_yoy_prev": np.nan, "rev_accel": np.nan,
-           "runway_q": np.nan, "profitable": np.nan, "revenue_q": np.nan}
+           "runway_q": np.nan, "profitable": np.nan, "revenue_q": np.nan,
+           "gross_margin": np.nan, "gm_change": np.nan, "ni_improve": np.nan}
     if tab is None or tab.empty:
         return nan
     vis = tab[tab["avail"] <= pd.Timestamp(date)]
@@ -121,14 +129,32 @@ def features_at(tab: pd.DataFrame, date) -> dict:
             out["rev_yoy_prev"] = _yoy(rev, rev.index[-2])
         if not np.isnan(out["rev_yoy"]) and not np.isnan(out["rev_yoy_prev"]):
             out["rev_accel"] = float(out["rev_yoy"] > out["rev_yoy_prev"])
+    gp = vis["gross_profit"].dropna() if "gross_profit" in vis else pd.Series(dtype=float)
+    if len(gp) and len(rev):
+        e = gp.index[-1]
+        if e in rev.index and rev.loc[e] > 0:
+            out["gross_margin"] = float(gp.loc[e] / rev.loc[e])
+            prev = _same_q_last_year(gp, e)
+            if prev is not None and prev in rev.index and rev.loc[prev] > 0:
+                out["gm_change"] = out["gross_margin"] - float(gp.loc[prev] / rev.loc[prev])
     ni = vis["net_income"].dropna()
     cash = vis["cash_total"].dropna()
+    if len(ni):
+        prev = _same_q_last_year(ni, ni.index[-1])
+        if prev is not None:
+            out["ni_improve"] = float(ni.iloc[-1] > ni.loc[prev])
     if len(ni):
         last_ni = float(ni.iloc[-1])
         out["profitable"] = float(last_ni > 0)
         if len(cash):
             out["runway_q"] = np.inf if last_ni >= 0 else float(cash.iloc[-1]) / -last_ni
     return out
+
+
+def _same_q_last_year(s: pd.Series, end):
+    target = end - pd.DateOffset(years=1)
+    near = s[(s.index >= target - pd.Timedelta(days=20)) & (s.index <= target + pd.Timedelta(days=20))]
+    return near.index[-1] if len(near) else None
 
 
 def _yoy(rev: pd.Series, end) -> float:

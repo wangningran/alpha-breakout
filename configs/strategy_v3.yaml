@@ -82,7 +82,10 @@ filters:
     min_runway_q: 4              # 亏损公司现金至少撑 4 个季度（= 12 个月）；null = 不检查
     min_rev_yoy: 0.5             # 最近季度营收同比 ≥ 50%；null = 不检查
     require_accel: false         # 要求营收增速加快
+    min_gm_change: null          # 毛利率同比至少提高多少（0.02 = 2 个百分点）；null = 不检查
     allow_missing: false         # 缺数据（没有营收 / 没有财报）时不放行
+  momentum:
+    max_rs60: null               # 试仓日 60 日相对 IWM 的超额涨幅上限（0.5 = 50%）；null = 不检查
   catalyst:                      # 按异动日前 3 天到后 1 天的公告类别排除
     exclude: []                  # 可选：offering, earnings, agreement, 13d_stake, reg_fd, other_event, none ...
 
@@ -92,5 +95,6 @@ portfolio:                       # 组合模拟（scripts/portfolio.py）
   max_positions: 10              # 最多同时持有 10 支
   max_new_per_day: 3             # 每天最多开 3 笔新试仓
   max_position_pct: 0.20         # 单支满仓市值不超过账户 20%
-  order: random                  # 同一天信号多于名额时的选择方式：random（多次随机取平均）
+  order: random                  # 同一天信号多于名额时：random / rs60_asc / gm_change_desc / rev_yoy_desc
+  idle_asset: null               # IWM = 闲置现金买入 IWM（指数 + 策略的混合方案）
   seeds: 20
