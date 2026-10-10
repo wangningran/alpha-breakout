@@ -22,17 +22,19 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from alpha_breakout import filings  # noqa: E402
 from alpha_breakout.config import load_config  # noqa: E402
 from alpha_breakout.data import adjust, get_daily, load_raw  # noqa: E402
 from alpha_breakout.strategy import market_filter, run_ticker, trades_frame  # noqa: E402
 from alpha_breakout.universe import shares_history, shares_series  # noqa: E402
 
 OUT = ROOT / "reports" / "data"
+_EMPTY = pd.DataFrame(columns=["cik", "date", "form", "items"])
 _G = {}
 
 
-def _init(cfg, sh):
-    _G["cfg"], _G["sh"] = cfg, sh
+def _init(cfg, sh, fil):
+    _G["cfg"], _G["sh"], _G["fil"] = cfg, sh, fil
     m = cfg.get("market") or {}
     _G["mkt"] = market_filter(get_daily(m.get("ticker", "IWM")), cfg) if m.get("enabled") else None
 
@@ -46,8 +48,11 @@ def _work(row):
     s = shares_series(_G["sh"], cik, df.index)
     stats = {}
     mkt = _G["mkt"]
-    staged = trades_frame(run_ticker(t, df, s, _G["cfg"], "staged", stats, mkt), _G["cfg"], "staged")
-    imm = trades_frame(run_ticker(t, df, s, _G["cfg"], "immediate", None, mkt), _G["cfg"], "immediate")
+    fil = _G["fil"].get(cik) if _G["fil"] is not None else None
+    if _G["fil"] is not None and fil is None:
+        fil = _EMPTY
+    staged = trades_frame(run_ticker(t, df, s, _G["cfg"], "staged", stats, mkt, fil), _G["cfg"], "staged")
+    imm = trades_frame(run_ticker(t, df, s, _G["cfg"], "immediate", None, mkt, fil), _G["cfg"], "immediate")
     return t, staged.to_dict("records"), imm.to_dict("records"), stats
 
 
@@ -114,6 +119,7 @@ def main():
     ap.add_argument("--set", nargs="*")
     ap.add_argument("--tickers")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--catalyst", action="store_true", help="没开增发过滤时也加载公告，给交易打催化剂标签")
     ap.add_argument("--universe", default=str(ROOT / "data" / "cache" / "universe.csv"))
     args = ap.parse_args()
 
@@ -122,10 +128,17 @@ def main():
     if args.tickers:
         u = u[u["ticker"].isin(args.tickers.split(","))]
     sh = shares_history()
+    fil = None
+    if ((cfg.get("filters") or {}).get("offering") or {}).get("enabled") or args.catalyst:
+        f = filings.load()
+        if f is None:
+            sys.exit("缺少 data/cache/filings.parquet，先跑 scripts/fetch_filings.py")
+        keep = f["form"].isin(filings.OFFERING_FORMS | {"S-3", "F-3"}) | f["form"].str.startswith(("8-K", "SC 13D", "SCHEDULE 13D"))
+        fil = {int(k): g.reset_index(drop=True) for k, g in f[keep].groupby("cik")}
     rows = list(zip(u["ticker"], u["cik"].astype(int)))
 
     staged, imm, funnel = [], [], {}
-    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(cfg, sh)) as ex:
+    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(cfg, sh, fil)) as ex:
         for k, (t, s, i, st) in enumerate(ex.map(_work, rows, chunksize=20)):
             staged += s
             imm += i
@@ -155,6 +168,10 @@ def main():
         summary["staged_by_timing"] = {k: summarize(g) for k, g in sdf.groupby("timing")}
         summary["staged_by_attempt"] = {str(k): summarize(g) for k, g in sdf.groupby("attempt")}
         summary["staged_by_kind"] = {k: summarize(g) for k, g in sdf.groupby("surge_kind")}
+        if "catalyst" in sdf and sdf["catalyst"].astype(bool).any():
+            summary["staged_by_catalyst"] = {k: summarize(g) for k, g in sdf.groupby("catalyst")}
+            summary["staged_by_catalyst_period"] = {f"{k[0]}|{k[1]}": summarize(g)
+                                                    for k, g in sdf.groupby(["catalyst", "period"])}
     (OUT / f"summary_{args.tag}.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
     print(json.dumps({k: summary[k] for k in ("universe_tickers", "funnel", "staged", "immediate")},
                      indent=2, ensure_ascii=False))

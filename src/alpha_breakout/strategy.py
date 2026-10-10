@@ -8,6 +8,12 @@
   full ：触及止损（加仓后上移到试仓成本）或收盘跌破 20 日线 → 全部出场
 
 mode=immediate 是对照组：异动次日开盘直接满仓，止损 / 跟踪规则相同，没有观察和试仓。
+
+v2 新增（都在配置里开关）：
+  clean   ：数据清洗，异动前就要有流动性、上市时间够长、没有停滞报价
+  offering：增发过滤，异动前 lookback_days 天到观察期内出现增发公告 → 异动作废；
+            持仓中出现增发公告 → 次日开盘出场（exit_on_offering）
+  catalyst：给每笔交易打上异动当天前后的公告类别标签（只统计，不过滤）
 """
 from __future__ import annotations
 
@@ -37,6 +43,7 @@ class Trade:
     pullback_before_signal: float = 0.0     # 入场前距异动以来最高收盘的最大回撤
     surge_gain: float = 0.0
     mcap_at_surge: float = np.nan
+    catalyst: str = ""
     extra: dict = field(default_factory=dict)
 
 
@@ -67,12 +74,22 @@ def indicators(df: pd.DataFrame, shares: pd.Series, cfg: dict) -> pd.DataFrame:
         & (out["mcap"] >= u["min_mcap"]) & (out["mcap"] <= u["max_mcap"])
         & (out["dollar_vol"] >= u["min_dollar_volume"])
     )
+    cl = cfg.get("clean") or {}
+    if cl.get("enabled"):
+        pre_dv = (c * vol).rolling(20).mean().shift(1)
+        zero = (vol <= 0).astype(float).rolling(20).sum().shift(1)
+        out["eligible"] &= (
+            (pd.Series(np.arange(len(df)), index=df.index) >= cl["min_history_days"])
+            & (pre_dv >= cl["pre_surge_dollar_volume"])
+            & (zero <= cl["max_zero_volume_days"])
+        )
     return out
 
 
 def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                mode: str = "staged", stats: dict | None = None,
-               market_ok: pd.Series | None = None) -> list[Trade]:
+               market_ok: pd.Series | None = None,
+               filings: pd.DataFrame | None = None) -> list[Trade]:
     """stats 传入 dict 时，会累加漏斗计数：surges（入池次数）、invalidated、expired。"""
     stats = stats if stats is not None else {}
     ind = indicators(df, shares, cfg)
@@ -91,6 +108,31 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
     mcap = ind["mcap"].to_numpy()
     mkt = (market_ok.reindex(idx).ffill().fillna(False).to_numpy(dtype=bool)
            if market_ok is not None else np.ones(len(idx), dtype=bool))
+    dv = ind["dollar_vol"].to_numpy()
+    clean_on = bool((cfg.get("clean") or {}).get("enabled"))
+    min_dv = cfg["universe"]["min_dollar_volume"]
+
+    # 增发公告：映射到交易日（周末 / 节假日申报的算下一个交易日）
+    off_cfg = (cfg.get("filters") or {}).get("offering") or {}
+    off_on = bool(off_cfg.get("enabled")) and filings is not None
+    off_flag = np.zeros(len(idx), dtype=bool)
+    off_dates = pd.DatetimeIndex([])
+    if filings is not None and len(filings):
+        forms = set(off_cfg.get("forms", [])) | (set(off_cfg.get("shelf_forms", [])) if off_cfg.get("include_shelf") else set())
+        off_dates = pd.DatetimeIndex(filings.loc[filings["form"].isin(forms), "date"]).sort_values()
+        pos = idx.searchsorted(off_dates)
+        off_flag[pos[pos < len(idx)]] = True
+    lookback = pd.Timedelta(days=off_cfg.get("lookback_days", 0))
+
+    def offering_before(i):
+        if not off_on or len(off_dates) == 0:
+            return False
+        lo, hi_ = idx[i] - lookback, idx[i]
+        k = off_dates.searchsorted(lo)
+        return k < len(off_dates) and off_dates[k] <= hi_
+
+    from .filings import catalyst_label
+    cat_excl = set(((cfg.get("filters") or {}).get("catalyst") or {}).get("exclude") or [])
 
     trades: list[Trade] = []
     state = "idle"
@@ -104,7 +146,8 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
 
     def new_trade(i):
         return Trade(ticker, idx[i], kind[i], float(pre[i]), attempt,
-                     surge_gain=float(c[i] / pre[i] - 1), mcap_at_surge=float(mcap[i]))
+                     surge_gain=float(c[i] / pre[i] - 1), mcap_at_surge=float(mcap[i]),
+                     catalyst=catalyst_label(filings, idx[i]) if filings is not None else "")
 
     for i in range(n):
         if idx[i] > end:
@@ -156,6 +199,12 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
         if state == "idle":
             if idx[i] >= start and kind[i] and elig[i]:
                 stats["surges"] = stats.get("surges", 0) + 1
+                if offering_before(i):  # 异动前后已经在发股
+                    stats["diluted"] = stats.get("diluted", 0) + 1
+                    continue
+                if cat_excl and filings is not None and catalyst_label(filings, idx[i]) in cat_excl:
+                    stats["catalyst_excluded"] = stats.get("catalyst_excluded", 0) + 1
+                    continue
                 attempt = 1
                 tr = new_trade(i)
                 s_i, hi, max_dd = i, c[i], 0.0
@@ -177,12 +226,17 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                 stats["expired"] = stats.get("expired", 0) + (attempt == 1)
                 state, tr = "idle", None
                 continue
+            if off_on and off_cfg.get("during_watch", True) and off_flag[i]:  # 观察期内出现增发公告
+                stats["diluted"] = stats.get("diluted", 0) + (attempt == 1)
+                state, tr = "idle", None
+                continue
             new_high = c[i] > hi * (1 - e["near_high_pct"]) if days > 0 else False
             ok = (
                 days >= w["min_days"] and new_high and vr[i] >= e["min_vol_ratio"]
                 and (not e.get("require_above_ma") or c[i] > ma[i])
                 and (not e.get("require_ma_rising") or ma_up[i])
                 and mkt[i]
+                and (not clean_on or dv[i] >= min_dv)
             )
             hi = max(hi, c[i])
             max_dd = min(max_dd, c[i] / hi - 1)
@@ -192,6 +246,8 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                 tr.pullback_before_signal = float(max_dd)
                 pending = ("probe", "")
                 state = "pending_entry"
+        elif state in ("probe", "full") and off_on and off_cfg.get("exit_on_offering") and off_flag[i]:
+            pending = ("exit", "offering")
         elif state == "probe":
             r = tr.entry - tr.stop0
             held = i - idx.get_loc(tr.entry_date)
@@ -233,7 +289,7 @@ def _after_exit(why, i, s_i, w, attempt, max_attempts, mode):
 
 def _clone_watch(prev: Trade, attempt: int) -> Trade:
     return Trade(prev.ticker, prev.surge_date, prev.surge_kind, prev.pre_surge_close, attempt,
-                 surge_gain=prev.surge_gain, mcap_at_surge=prev.mcap_at_surge)
+                 surge_gain=prev.surge_gain, mcap_at_surge=prev.mcap_at_surge, catalyst=prev.catalyst)
 
 
 def trade_pnl(t: Trade, cfg: dict, mode: str = "staged") -> dict:

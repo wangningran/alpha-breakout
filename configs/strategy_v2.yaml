@@ -1,0 +1,72 @@
+# 策略 v2 = v1 + 数据清洗 + 增发过滤 + 催化剂标签（全行业美股小盘股）
+# 窗口单位都是交易日；信号都在收盘后判断，次日开盘执行。
+
+universe:
+  min_price: 1.0                 # 当时真实收盘价（未做拆股调整）
+  min_mcap: 100000000            # 1 亿美元
+  max_mcap: 3000000000           # 30 亿美元
+  min_dollar_volume: 2000000     # 20 日平均成交额（含异动日）
+  dollar_volume_window: 20
+
+surge:                           # 入池：满足任意一条
+  one_day:
+    min_ret: 0.12                # 单日涨幅 ≥ 12%
+    min_vol_ratio: 3.0           # 且成交量 ≥ 50 日均量 3 倍
+  multi_day:
+    window: 5
+    min_ret: 0.30                # 或 5 日涨幅 ≥ 30%
+  vol_avg_window: 50
+
+watch:
+  max_days: 90                   # 入池后最多观察 90 个交易日
+  min_days: 10                   # 至少观察 10 天才允许试仓
+  invalidate: pre_surge_close    # 收盘跌回异动前的价格 = 异动作废，出池
+  invalidate_buffer: 0.0
+  max_attempts: 2                # 试仓失败后（异动仍有效）可以再等一次新高，最多试 2 次
+
+entry:                           # 试仓触发：观察期满后，收盘创“异动以来新高”
+  new_high_lookback: since_surge # 和异动以来的最高收盘比
+  near_high_pct: 0.0             # 0 = 必须创新高；0.05 = 距新高 5% 以内也算
+  min_vol_ratio: 1.5             # 当天量比
+  require_above_ma: 20           # 收盘在 20 日均线上方
+  require_ma_rising: true        # 且 20 日均线比 5 天前高
+
+market:                          # 大盘过滤（只影响开新仓）
+  enabled: false
+  ticker: IWM
+  ma: 200                        # IWM 收盘在 200 日均线上方才试仓
+
+position:
+  probe_size: 0.333              # 试仓 1/3
+  add_size: 0.667                # 验证后加到满仓
+  stop_lookback: 10              # 初始止损 = 近 10 日最低点
+  max_stop_pct: 0.15             # 但最多亏 15%（止损不低于入场价 × 0.85）
+  add_trigger_r: 1.0             # 试仓浮盈达到 1R（收盘）就加仓
+  probe_max_days: 20             # 试仓 20 天内没到 1R 就出局（验证失败）
+  breakeven_after_add: false     # true = 加仓后止损上移到试仓成本（PRME 测试里太紧，容易被盘中针扫掉）
+  trail_ma: 20                   # 加仓后收盘跌破 20 日均线出场
+  max_hold_days: 120
+  slippage: 0.005                # 每次成交单边滑点 0.5%
+
+backtest:
+  start: "2019-06-01"
+  end: null
+
+clean:                           # 数据清洗：排除异动前不可交易的票
+  enabled: true
+  min_history_days: 120          # 有行情的交易日 ≥ 120（新股上市不满半年不做）
+  pre_surge_dollar_volume: 1000000   # 异动前 20 日平均成交额 ≥ 100 万美元
+  max_zero_volume_days: 2        # 异动前 20 日里零成交的天数 ≤ 2
+                                 # 另外：试仓当天 20 日平均成交额也要 ≥ universe.min_dollar_volume
+
+filters:
+  offering:                      # 增发过滤（SEC 公告）
+    enabled: true
+    forms: [424B1, 424B4, 424B5, S-1, S-1/A, F-1, F-1/A]   # 实际发行 / 定价 / 新发行注册
+    shelf_forms: [S-3, F-3]      # 储架注册（只是“准备好可以发”）
+    include_shelf: false
+    lookback_days: 5             # 异动日前 5 天内（日历日）有增发公告也算
+    during_watch: false          # true = 观察期内出现增发公告也作废（回测里更差，默认只看异动前后）
+    exit_on_offering: false      # true = 持仓中出现增发公告，次日开盘出场
+  catalyst:                      # 按异动日前 3 天到后 1 天的公告类别排除
+    exclude: []                  # 可选：offering, earnings, agreement, 13d_stake, reg_fd, other_event, none ...
