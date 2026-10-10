@@ -1,0 +1,9 @@
+Date,rel_day,close,ret_1d,base_range_60,base_range_90,base_range_120,rv20,rv20_pctile,vol_ratio,close_location,rs_20d,dollar_vol_avg,ok_liquidity,ok_tight_base,ok_low_vol,ok_breakout,ok_volume,ok_close_loc,ok_rs,n_conditions,signal
+2020-02-06,-7,28.6400,,,,,,,,0.5322,,,False,False,False,False,False,False,False,0,False
+2020-02-07,-6,31.9200,0.1145,,,,,,,0.5393,,,False,False,False,False,False,False,False,0,False
+2020-02-10,-5,28.9400,-0.0934,,,,,,,0.1554,,,False,False,False,False,False,False,False,0,False
+2020-02-11,-4,26.7900,-0.0743,,,,,,,0.0488,,,False,False,False,False,False,False,False,0,False
+2020-02-12,-3,27.1300,0.0127,,,,,,,0.3021,,,False,False,False,False,False,False,False,0,False
+2020-02-13,-2,26.6000,-0.0195,,,,,,,0.3624,,,False,False,False,False,False,False,False,0,False
+2020-02-14,-1,26.9000,0.0113,,,,,,,0.7674,,,False,False,False,False,False,True,False,1,False
+2020-02-18,0,31.9000,0.1859,,,,,,,0.9496,,,False,False,False,False,False,True,False,1,False

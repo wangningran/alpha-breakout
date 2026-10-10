@@ -1,0 +1,16 @@
+ticker,day0,filingDate,form,items,url
+PRME,2025-06-06,2025-05-08,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1894562/000162828025023482/prme-20250508.htm
+PRME,2025-06-06,2025-05-19,8-K,"5.02,7.01,8.01,9.01",https://www.sec.gov/Archives/edgar/data/1894562/000119312525122156/d863812d8k.htm
+PRME,2025-06-06,2025-06-05,8-K,"5.07,9.01",https://www.sec.gov/Archives/edgar/data/1894562/000162828025029646/prme-20250604.htm
+PRME,2025-09-05,2025-08-07,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1894562/000162828025038617/prme-20250807.htm
+PRME,2025-09-05,2025-08-11,SCHEDULE 13D/A,,https://www.sec.gov/Archives/edgar/data/1894562/000107261325000536/xslSCHEDULE_13D_X01/primary_doc.xml
+PRME,2025-09-05,2025-09-08,8-K,"7.01,9.01",https://www.sec.gov/Archives/edgar/data/1894562/000189456225000056/prme-20250908.htm
+PRME,2026-06-17,2026-06-08,8-K,5.07,https://www.sec.gov/Archives/edgar/data/1894562/000162828026041543/prme-20260605.htm
+SDGR,2020-02-18,2020-02-10,8-K,"5.03,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000119312520029889/d133373d8k.htm
+SDGR,2020-11-23,2020-11-12,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000156459020053268/sdgr-8k_20201112.htm
+SDGR,2020-11-23,2020-11-23,8-K,1.01,https://www.sec.gov/Archives/edgar/data/1490978/000119312520300273/d72893d8k.htm
+SDGR,2022-05-17,2022-05-04,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000156459022017846/sdgr-8k_20220504.htm
+SDGR,2022-05-17,2022-05-19,8-K,5.02,https://www.sec.gov/Archives/edgar/data/1490978/000156459022020696/sdgr-8k_20220517.htm
+SDGR,2023-03-01,2023-02-28,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000149097823000023/sdgr-20230228.htm
+SDGR,2023-11-02,2023-11-01,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000149097823000108/sdgr-20231101.htm
+SDGR,2026-08-06,2026-08-05,8-K,"2.02,9.01",https://www.sec.gov/Archives/edgar/data/1490978/000149097826000067/sdgr-20260805.htm

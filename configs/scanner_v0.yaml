@@ -1,0 +1,32 @@
+# 突破扫描器 v0 参数（对应 STRATEGY.md 第 3 节），后续回测校准时只改这里。
+# 所有窗口单位都是交易日；所有“过去 N 日”都不含信号当天。
+
+liquidity:
+  min_price: 2.0              # 收盘价 > 2 美元
+  min_dollar_volume: 2000000   # 20 日平均成交额 > 200 万美元
+  dollar_volume_window: 20
+
+consolidation:                # 横盘：任意一个回看窗口满足即可
+  base_lookbacks: [60, 90, 120]
+  max_base_range: 0.60        # 横盘区 (最高/最低 - 1) 上限
+  vol_window: 20              # 20 日年化波动率
+  vol_rank_lookback: 252      # 和过去 252 日的 20 日波动率比
+  max_vol_percentile: 0.35    # 波动率分位 ≤ 35% 算“历史低位”
+  vol_check: prev_day         # prev_day = 看突破前一天；min_in_base = 看过去 vol_check_window 日的最低分位
+  vol_check_window: 60
+
+breakout:                     # 满足其一：突破横盘上沿 或 突破 52 周高点
+  use_base_high: true
+  use_52w_high: true
+  high_lookback: 252
+  price_field: High           # 横盘上沿 / 52 周高点用 High 还是 Close
+
+volume:
+  avg_window: 50
+  min_volume_mult: 3.0        # 成交量 ≥ 50 日均量 3 倍
+  min_close_location: 0.667   # (收-低)/(高-低) ≥ 2/3，收在当日振幅上 1/3
+
+relative_strength:
+  benchmark: XBI
+  window: 20
+  min_excess_return: 0.0      # 近 20 日收益 - XBI 近 20 日收益 > 0

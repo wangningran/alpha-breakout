@@ -1,0 +1,11 @@
+# 事件复盘样本。manual_day0 填了就以手工起涨日为准（会和自动识别的结果一起列出）。
+start: "2020-01-01"
+samples:
+  - ticker: PRME
+    name: Prime Medicine
+    theme: 基因编辑，低价押注催化剂
+    manual_day0: []
+  - ticker: SDGR
+    name: Schrödinger
+    theme: AI 制药题材联动
+    manual_day0: []

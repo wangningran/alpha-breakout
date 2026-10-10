@@ -1,0 +1,28 @@
+# v0b：只改一处 —— 低波动条件从“突破前一天”改为“过去 60 日内出现过”。
+# 来源：PRME / SDGR 复盘里，放量突破前几天波动率已经抬升，v0 的 prev_day 检查把所有突破都挡掉了。
+# 其余参数与 scanner_v0.yaml 相同；scripts/event_study.py --config configs/scanner_v0b.yaml 使用。
+liquidity:
+  min_price: 2.0
+  min_dollar_volume: 2000000
+  dollar_volume_window: 20
+consolidation:
+  base_lookbacks: [60, 90, 120]
+  max_base_range: 0.60
+  vol_window: 20
+  vol_rank_lookback: 252
+  max_vol_percentile: 0.35
+  vol_check: min_in_base
+  vol_check_window: 60
+breakout:
+  use_base_high: true
+  use_52w_high: true
+  high_lookback: 252
+  price_field: High
+volume:
+  avg_window: 50
+  min_volume_mult: 3.0
+  min_close_location: 0.667
+relative_strength:
+  benchmark: XBI
+  window: 20
+  min_excess_return: 0.0
