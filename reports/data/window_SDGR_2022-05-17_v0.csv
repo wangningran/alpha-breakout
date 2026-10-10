@@ -1,7 +1,7 @@
 Date,rel_day,close,ret_1d,base_range_60,base_range_90,base_range_120,rv20,rv20_pctile,vol_ratio,close_location,rs_20d,dollar_vol_avg,ok_liquidity,ok_tight_base,ok_low_vol,ok_breakout,ok_volume,ok_close_loc,ok_rs,n_conditions,signal
 2022-02-18,-60,25.7400,-0.0442,0.7189,1.4567,1.7284,0.5692,0.6230,0.7181,0.0839,-0.0424,26864511.6430,True,False,False,False,False,False,False,1,False
 2022-02-22,-59,26.2200,0.0186,0.7189,1.4567,1.7284,0.5898,0.6508,0.8738,0.6338,-0.0253,25422863.3422,True,False,False,False,False,False,False,1,False
-2022-02-23,-58,24.8400,-0.0526,0.7189,1.4567,1.7284,0.5810,0.6389,0.9081,0.1019,-0.0310,24072900.0237,True,False,False,False,False,False,False,1,False
+2022-02-23,-58,24.8400,-0.0526,0.7189,1.4567,1.7284,0.5810,0.6389,0.9081,0.1019,-0.0309,24072900.0237,True,False,False,False,False,False,False,1,False
 2022-02-24,-57,27.4000,0.1031,0.7189,1.4567,1.7284,0.6077,0.6746,1.7435,0.9768,0.0351,23213144.2696,True,False,False,False,False,True,True,3,False
 2022-02-25,-56,32.6400,0.1912,0.8103,1.5873,1.8734,0.6981,0.8333,3.4363,0.6680,0.2303,24233021.0645,True,False,False,False,True,True,True,4,False
 2022-02-28,-55,34.7600,0.0650,0.8103,1.5873,1.8414,0.9098,0.9127,2.1880,0.8713,0.3116,27808434.9352,True,False,False,False,False,True,True,3,False

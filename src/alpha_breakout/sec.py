@@ -33,10 +33,11 @@ def _get(url: str) -> dict:
     return {}
 
 
-def _cached_json(name: str, url: str, refresh: bool) -> dict:
+def _cached_json(name: str, url: str, refresh: bool, static: bool = False) -> dict:
+    """static=True：历史数据不会变，有缓存就用；否则缓存只在当天有效。"""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / name
-    fresh = path.exists() and dt.date.fromtimestamp(path.stat().st_mtime) == dt.date.today()
+    fresh = path.exists() and (static or dt.date.fromtimestamp(path.stat().st_mtime) == dt.date.today())
     if refresh or not fresh:
         path.write_text(json.dumps(_get(url)))
         time.sleep(0.2)  # SEC 限速 10 req/s
