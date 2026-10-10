@@ -2,7 +2,7 @@
 # 来源：PRME / SDGR 复盘里，放量突破前几天波动率已经抬升，v0 的 prev_day 检查把所有突破都挡掉了。
 # 其余参数与 scanner_v0.yaml 相同；scripts/event_study.py --config configs/scanner_v0b.yaml 使用。
 liquidity:
-  min_price: 2.0
+  min_price: 1.0
   min_dollar_volume: 2000000
   dollar_volume_window: 20
 consolidation:

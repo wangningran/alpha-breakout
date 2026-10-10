@@ -49,7 +49,7 @@ def get_daily(ticker: str, start: str | None = None, end: str | None = None,
 
     口径：Yahoo 的 Close/Volume 已做拆股调整；这里再用 Adj Close / Close
     把 Open/High/Low/Close 调成含分红的复权价（小盘生物科技基本不分红，影响很小）。
-    注意：拆股调整后的历史价格不等于当时真实成交价，反向拆股的票用 price>2 过滤时要留意。
+    注意：拆股调整后的历史价格不等于当时真实成交价，反向拆股的票用价格门槛过滤时要留意。
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(ticker)

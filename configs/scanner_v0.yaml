@@ -2,7 +2,7 @@
 # 所有窗口单位都是交易日；所有“过去 N 日”都不含信号当天。
 
 liquidity:
-  min_price: 2.0              # 收盘价 > 2 美元
+  min_price: 1.0              # 收盘价 > 1 美元（原 2 美元，2026-10-10 用户放宽）
   min_dollar_volume: 2000000   # 20 日平均成交额 > 200 万美元
   dollar_volume_window: 20
 
