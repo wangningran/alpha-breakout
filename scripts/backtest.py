@@ -1,11 +1,13 @@
-"""策略 v1 全市场回测：异动 → 观察 → 试仓 → 加仓，并和“异动次日直接满仓”对照。
+"""全市场回测：异动 → 观察 → 试仓 → 加仓，并和“异动次日直接满仓”对照。
 
 用法：
-    PYTHONPATH=src python scripts/backtest_v1.py [--config configs/strategy_v1.yaml] [--tag v1]
-        [--set position.breakeven_after_add=true ...] [--tickers SDGR,PRME]
+    python scripts/backtest.py [--config configs/strategy_v3.yaml] [--tag v3]
+        [--set position.exit_mode=atr ...] [--tickers SDGR,PRME] [--features]
 
-前置：先跑 scripts/build_universe.py 下载行情。
+前置：scripts/build_universe.py（行情）、scripts/fetch_filings.py（公告）、
+      scripts/fetch_fundamentals.py（基本面，用到 fundamentals 过滤或 --features 时需要）。
 输出到 reports/data/：trades_<tag>_staged.csv、trades_<tag>_immediate.csv、summary_<tag>.json
+--features：给每笔分批交易加上试仓日的 13D/13G 和基本面特征列（用于分组研究）。
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from alpha_breakout import filings  # noqa: E402
+from alpha_breakout import fundamentals as fmod  # noqa: E402
+from alpha_breakout.research import make_entry_filter, trade_features  # noqa: E402
 from alpha_breakout.config import load_config  # noqa: E402
 from alpha_breakout.data import adjust, get_daily, load_raw  # noqa: E402
 from alpha_breakout.strategy import market_filter, run_ticker, trades_frame  # noqa: E402
@@ -33,8 +37,8 @@ _EMPTY = pd.DataFrame(columns=["cik", "date", "form", "items"])
 _G = {}
 
 
-def _init(cfg, sh, fil):
-    _G["cfg"], _G["sh"], _G["fil"] = cfg, sh, fil
+def _init(cfg, sh, fil, fund, want_features):
+    _G["cfg"], _G["sh"], _G["fil"], _G["fund"], _G["feat"] = cfg, sh, fil, fund, want_features
     m = cfg.get("market") or {}
     _G["mkt"] = market_filter(get_daily(m.get("ticker", "IWM")), cfg) if m.get("enabled") else None
 
@@ -51,8 +55,13 @@ def _work(row):
     fil = _G["fil"].get(cik) if _G["fil"] is not None else None
     if _G["fil"] is not None and fil is None:
         fil = _EMPTY
-    staged = trades_frame(run_ticker(t, df, s, _G["cfg"], "staged", stats, mkt, fil), _G["cfg"], "staged")
+    ftab = fmod.company_table(_G["fund"], cik) if _G["fund"] is not None else None
+    efilter = make_entry_filter(_G["cfg"], fil, ftab)
+    staged = trades_frame(run_ticker(t, df, s, _G["cfg"], "staged", stats, mkt, fil, efilter), _G["cfg"], "staged")
     imm = trades_frame(run_ticker(t, df, s, _G["cfg"], "immediate", None, mkt, fil), _G["cfg"], "immediate")
+    if _G["feat"] and len(staged):
+        feats = [trade_features(fil, ftab, r.surge_date, r.signal_date) for r in staged.itertuples()]
+        staged = pd.concat([staged, pd.DataFrame(feats, index=staged.index)], axis=1)
     return t, staged.to_dict("records"), imm.to_dict("records"), stats
 
 
@@ -91,6 +100,7 @@ def summarize(df: pd.DataFrame) -> dict:
         "avg_win_pct": round(float(pnl[wins].mean()) * 100, 2) if wins.any() else None,
         "avg_loss_pct": round(float(pnl[~wins].mean()) * 100, 2) if (~wins).any() else None,
         "expectancy_R": round(float(r.mean()), 3),
+        "expectancy_R_cap20": round(float(r.clip(upper=20).mean()), 3),
         "median_R": round(float(r.median()), 3),
         "avg_win_R": round(float(r[wins].mean()), 2) if wins.any() else None,
         "avg_loss_R": round(float(r[~wins].mean()), 2) if (~wins).any() else None,
@@ -114,13 +124,14 @@ def max_streak(b: pd.Series) -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v1.yaml"))
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v3.yaml"))
+    ap.add_argument("--tag", default="v3")
     ap.add_argument("--set", nargs="*")
     ap.add_argument("--tickers")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--catalyst", action="store_true", help="没开增发过滤时也加载公告，给交易打催化剂标签")
     ap.add_argument("--universe", default=str(ROOT / "data" / "cache" / "universe.csv"))
+    ap.add_argument("--features", action="store_true")
     args = ap.parse_args()
 
     cfg = load_config(args.config, parse_set(args.set))
@@ -129,16 +140,27 @@ def main():
         u = u[u["ticker"].isin(args.tickers.split(","))]
     sh = shares_history()
     fil = None
-    if ((cfg.get("filters") or {}).get("offering") or {}).get("enabled") or args.catalyst:
+    flt = cfg.get("filters") or {}
+    need_holders = ((flt.get("holders") or {}).get("require") or "none") != "none"
+    need_fund = any((flt.get("fundamentals") or {}).get(k) not in (None, False)
+                    for k in ("min_runway_q", "min_rev_yoy", "require_accel"))
+    if (flt.get("offering") or {}).get("enabled") or args.catalyst or args.features or need_holders:
         f = filings.load()
         if f is None:
             sys.exit("缺少 data/cache/filings.parquet，先跑 scripts/fetch_filings.py")
-        keep = f["form"].isin(filings.OFFERING_FORMS | {"S-3", "F-3"}) | f["form"].str.startswith(("8-K", "SC 13D", "SCHEDULE 13D"))
+        keep = f["form"].isin(filings.OFFERING_FORMS | {"S-3", "F-3"}) | f["form"].str.startswith(
+            ("8-K", "SC 13D", "SCHEDULE 13D", "SC 13G", "SCHEDULE 13G"))
         fil = {int(k): g.reset_index(drop=True) for k, g in f[keep].groupby("cik")}
+    fund = None
+    if need_fund or args.features:
+        fund = fmod.load()
+        if fund is None:
+            sys.exit("缺少 data/cache/fundamentals.parquet，先跑 scripts/fetch_fundamentals.py")
+        fund = fund[fund["cik"].isin(set(u["cik"].astype(int)))]
     rows = list(zip(u["ticker"], u["cik"].astype(int)))
 
     staged, imm, funnel = [], [], {}
-    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(cfg, sh, fil)) as ex:
+    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(cfg, sh, fil, fund, args.features)) as ex:
         for k, (t, s, i, st) in enumerate(ex.map(_work, rows, chunksize=20)):
             staged += s
             imm += i

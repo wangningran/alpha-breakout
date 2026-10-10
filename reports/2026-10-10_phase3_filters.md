@@ -6,7 +6,7 @@
   - 缓存在 `data/cache/filings.parquet`；
   - 拉取脚本 `scripts/fetch_filings.py`，首次约 15 分钟。
 - 新配置：`configs/strategy_v2.yaml`（v1 加上 clean / filters 两节）。
-- 复现：`python scripts/backtest_v1.py --config configs/strategy_v2.yaml --tag v2`；其余变体用 `--set`。
+- 复现：`python scripts/backtest.py --config configs/strategy_v2.yaml --tag v2`（脚本原名 backtest_v1.py）；其余变体用 `--set`。
 - 判断口径：每个改动都看 2019–23 和 2024–26 两段。只在一段里变好的，不算有效。
 
 ## 1. 结论

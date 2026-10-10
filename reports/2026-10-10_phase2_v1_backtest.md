@@ -6,7 +6,7 @@
 - 市值：按时点估算，= 当日真实收盘价（还原拆股调整）× 当时已披露的最近一期股本（SEC XBRL，封面股本滞后 5 天、加权平均股本滞后 45 天才使用）。
 - 复现：
   - `python scripts/build_universe.py`：建股票池并下载行情，首次约 25 分钟；
-  - `python scripts/backtest_v1.py --tag v1`：跑回测，约 75 秒；
+  - `python scripts/backtest.py --config configs/strategy_v1.yaml --tag v1`：跑回测（脚本原名 backtest_v1.py，第四阶段改名），约 75 秒；
   - 参数变体用 `--set 键=值`。
 - 明细：
   - `reports/data/trades_v1_staged.csv`、`trades_v1_immediate.csv`：v1 和对照组的逐笔交易；

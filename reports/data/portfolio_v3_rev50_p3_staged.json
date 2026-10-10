@@ -1,0 +1,56 @@
+{
+  "tag": "v3_rev50_p3",
+  "mode": "staged",
+  "portfolio": {
+    "initial_equity": 100000,
+    "risk_per_trade": 0.005,
+    "max_positions": 10,
+    "max_new_per_day": 3,
+    "max_position_pct": 0.2,
+    "seeds": 20,
+    "order": "random"
+  },
+  "seeds": 20,
+  "summary": {
+    "total_return": {
+      "median": 0.8160000000000001,
+      "p10": 0.3971,
+      "p90": 1.0112
+    },
+    "cagr": {
+      "median": 0.0885,
+      "p10": 0.0489,
+      "p90": 0.1041
+    },
+    "max_drawdown": {
+      "median": -0.511,
+      "p10": -0.5213,
+      "p90": -0.5019
+    },
+    "sharpe": {
+      "median": 0.445,
+      "p10": 0.31,
+      "p90": 0.5
+    },
+    "trades_taken": {
+      "median": 475.0,
+      "p10": 471.9,
+      "p90": 479.1
+    },
+    "trades_skipped": {
+      "median": 129.0,
+      "p10": 124.9,
+      "p90": 132.1
+    },
+    "yearly_return_median": {
+      "2019": -0.035,
+      "2020": 1.069,
+      "2021": 0.272,
+      "2022": -0.273,
+      "2023": 0.013,
+      "2024": 0.201,
+      "2025": -0.1485,
+      "2026": -0.065
+    }
+  }
+}

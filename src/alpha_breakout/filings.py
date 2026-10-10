@@ -115,3 +115,38 @@ def catalyst_label(f: pd.DataFrame, surge_date, before_days: int = 3, after_days
         if code in items:
             return name
     return "other_filing" if w["form"].str.startswith("8-K").any() else "none"
+
+
+NEW_13D = {"SC 13D", "SCHEDULE 13D"}
+AMEND_13D = {"SC 13D/A", "SCHEDULE 13D/A"}
+NEW_13G = {"SC 13G", "SCHEDULE 13G"}
+
+
+def holder_features(f: pd.DataFrame | None, surge_date, until, before_days: int = 30) -> dict:
+    """异动前 before_days 天到 until（通常是试仓信号日）之间的大股东申报次数。
+
+    new_13d  ：新的 13D（持股 ≥5% 且可能谋求影响公司，主动型）
+    amend_13d：13D 修订（增持、减持或意图变化，方向需要看正文）
+    new_13g  ：新的 13G（持股 ≥5% 的被动投资者，比如基金首次举牌）
+    """
+    out = {"new_13d": 0, "amend_13d": 0, "new_13g": 0}
+    if f is None or f.empty:
+        return out
+    lo = pd.Timestamp(surge_date) - pd.Timedelta(days=before_days)
+    w = f[(f["date"] >= lo) & (f["date"] <= pd.Timestamp(until))]
+    out["new_13d"] = int(w["form"].isin(NEW_13D).sum())
+    out["amend_13d"] = int(w["form"].isin(AMEND_13D).sum())
+    out["new_13g"] = int(w["form"].isin(NEW_13G).sum())
+    return out
+
+
+def refresh_companies(ciks, since: str = "2018-06-01", log=print) -> pd.DataFrame:
+    """重新拉指定公司的公告（每日扫描时只刷新观察名单里的公司），合并进缓存。"""
+    ciks = [int(c) for c in ciks]
+    old = load()
+    parts = [old[~old["cik"].isin(ciks)]] if old is not None else []
+    for c in ciks:
+        parts.append(_safe(c, since))
+    out = _save(parts)
+    log(f"filings refreshed for {len(ciks)} companies")
+    return out

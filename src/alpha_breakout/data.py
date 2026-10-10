@@ -123,3 +123,43 @@ def get_many(tickers, start=None, end=None, refresh=False) -> dict[str, pd.DataF
 
 def get_benchmarks(start=None, end=None, refresh=False) -> dict[str, pd.DataFrame]:
     return get_many(BENCHMARKS, start, end, refresh)
+
+
+def update_recent(tickers, period: str = "1mo", batch: int = 200, log=print) -> int:
+    """增量更新：拉最近一段行情，合并进已有缓存（新数据覆盖重叠日期）。返回更新的代码数。"""
+    import yfinance as yf
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tickers = list(tickers)
+    updated = 0
+    for i in range(0, len(tickers), batch):
+        chunk = tickers[i: i + batch]
+        try:
+            df = yf.download(chunk, period=period, interval="1d", auto_adjust=False, actions=True,
+                             progress=False, threads=True, group_by="ticker")
+        except Exception as e:
+            log(f"[warn] update batch {i}: {e}")
+            continue
+        got = set(df.columns.get_level_values(0)) if isinstance(df.columns, pd.MultiIndex) else set()
+        for t in chunk:
+            if t not in got:
+                continue
+            new = _clean(df[t])
+            if new.empty:
+                continue
+            old = load_raw(t)
+            if old is not None:
+                # 缓存里还没有的新拆股：Yahoo 会改写全部历史价格，这种情况直接整段重拉
+                split_days = new.index[new["Stock Splits"] > 0]
+                if any(d not in old.index or old.at[d, "Stock Splits"] == 0 for d in split_days):
+                    try:
+                        _download(t, start=str(old.index.min().date())).to_parquet(_cache_path(t))
+                        updated += 1
+                    except Exception as e:
+                        log(f"[warn] split refresh {t}: {e}")
+                    continue
+                new = pd.concat([old[old.index < new.index.min()], new])
+            new.to_parquet(_cache_path(t))
+            updated += 1
+        log(f"  updated {min(i + batch, len(tickers))}/{len(tickers)}")
+    return updated
