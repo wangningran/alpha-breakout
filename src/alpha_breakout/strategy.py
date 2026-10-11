@@ -275,6 +275,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
             new_high = c[i] > hi * (1 - e["near_high_pct"]) if days > 0 else False
             ok = (
                 days >= w["min_days"] and new_high and vr[i] >= e["min_vol_ratio"]
+                and (e.get("max_vol_ratio") is None or vr[i] <= e["max_vol_ratio"])
                 and (not e.get("require_above_ma") or c[i] > ma[i])
                 and (not e.get("require_ma_rising") or ma_up[i])
                 and mkt[i]

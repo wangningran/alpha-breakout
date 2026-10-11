@@ -30,6 +30,7 @@ entry:                           # 试仓触发：观察期满后，收盘创“
   new_high_lookback: since_surge # 和异动以来的最高收盘比
   near_high_pct: 0.0             # 0 = 必须创新高；0.05 = 距新高 5% 以内也算
   min_vol_ratio: 1.5             # 当天量比
+  max_vol_ratio: null            # 当天量比上限（例如 3.6 = 不在放天量那天追）；null = 不限
   require_above_ma: 20           # 收盘在 20 日均线上方
   require_ma_rising: true        # 且 20 日均线比 5 天前高
 
@@ -44,7 +45,7 @@ position:
   stop_lookback: 10              # 初始止损 = 近 10 日最低点
   max_stop_pct: 0.15             # 但最多亏 15%（止损不低于入场价 × 0.85）
   add_trigger_r: 1.0             # 试仓浮盈达到 1R（收盘）就加仓
-  probe_max_days: 20             # 试仓 20 天内没到 1R 就出局（验证失败）
+  probe_max_days: 10             # 试仓 10 天内没到 1R 就出局（2026-10-11 由 20 改为 10：两段回测都更好）
   breakeven_after_add: false     # true = 加仓后止损上移到试仓成本（PRME 测试里太紧，容易被盘中针扫掉）
   exit_mode: ma                  # ma = 收盘跌破均线出场；atr = 最高收盘 - atr_mult × ATR 的跟踪止损（盘中触发）
   trail_ma: 20                   # exit_mode=ma 时：加仓后收盘跌破 20 日均线出场
