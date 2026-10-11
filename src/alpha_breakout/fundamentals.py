@@ -52,6 +52,8 @@ def fetch(start_year: int = 2017, refresh: bool = False, log=print) -> pd.DataFr
                 break
             recent = (today - q_end).days < 200
             for key, concept in list(DURATION.items()) + list(INSTANT.items()):
+                if key == "rev_3" and y >= 2020:  # SalesRevenueNet 2019 年后基本停用，frame 不存在，跳过避免反复 404
+                    continue
                 period = f"CY{y}Q{q}" + ("I" if key in INSTANT else "")
                 try:
                     d = sec._cached_json(f"frame_{concept}_{period}.json",
