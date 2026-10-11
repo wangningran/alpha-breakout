@@ -29,6 +29,7 @@ src/alpha_breakout/
   fundamentals.py          SEC XBRL 季度基本面（营收、净利润、现金），按时点取值
   research.py              试仓前检查（13D/13G、基本面）和交易特征
   portfolio.py             组合层面模拟（资金、仓位上限、盯市）
+  insiders.py              内部人交易（Form 4）列表与解析
   scanner.py               逐日计算指标 + v0 规则判定
   event_study.py           大涨段识别（zigzag）、day 0 对齐、窗口统计
   sec.py                   SEC EDGAR 公告列表
@@ -38,6 +39,7 @@ scripts/fetch_fundamentals.py  拉全市场季度基本面（首次约 10 分钟
 scripts/backtest.py        全市场回测（--config 选 v1 / v2 / v3），输出到 reports/data/
 scripts/portfolio.py       组合模拟（读回测输出的交易；支持信号排序、闲置资金买 IWM）
 scripts/walk_forward.py    分段验证：训练期挑过滤条件，测试期检验
+scripts/fetch_insiders.py  拉回测交易相关窗口内的 Form 4（约 50 分钟）
 scripts/daily_scan.py      每日扫描：输出 reports/daily/<日期>.md，并追加研究日志
 scripts/evaluate_journal.py  评估研究日志（做 / 不做 两组之后的表现）
 scripts/event_study.py     v0 样本复盘（第一阶段）

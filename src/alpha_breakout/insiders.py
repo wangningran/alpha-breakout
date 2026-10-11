@@ -19,7 +19,11 @@ import pandas as pd
 import requests
 
 from . import sec
-from .filings import _throttle
+from .filings import _throttle as _throttle_base
+
+
+def _throttle():
+    _throttle_base(0.11)  # 约 9 req/s，低于 SEC 的 10 req/s
 
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = ROOT / "data" / "cache" / "form4_index.parquet"
@@ -119,21 +123,32 @@ def _fetch_one(row) -> list[dict]:
     return [{"cik": cik, "accession": acc, "filing_date": row.filing_date, **who, **t} for t in txs]
 
 
-def form4_details(rows: pd.DataFrame, workers: int = 4, log=print) -> pd.DataFrame:
+def form4_details(rows: pd.DataFrame, workers: int = 8, save_every: int = 2000, log=print) -> pd.DataFrame:
+    """逐份下载解析，每 save_every 份落盘一次（中断后重跑会跳过已完成的）。"""
     old = pd.read_parquet(TX) if TX.exists() else None
     done = set(old["accession"]) if old is not None else set()
     todo = rows[~rows["accession"].isin(done)].drop_duplicates("accession")
+    parts = [old] if old is not None else []
     recs = []
+
+    def flush():
+        nonlocal recs
+        if recs:
+            new = pd.DataFrame(recs).reindex(columns=TX_COLS)
+            new["tx_date"] = pd.to_datetime(new["tx_date"], errors="coerce")
+            parts.append(new)
+            recs = []
+        out = pd.concat(parts, ignore_index=True)
+        out.to_parquet(TX)
+        return out
+
     with ThreadPoolExecutor(workers) as ex:
         for k, res in enumerate(ex.map(_fetch_one, todo.itertuples())):
             recs += res
-            if (k + 1) % 1000 == 0:
+            if (k + 1) % save_every == 0:
+                flush()
                 log(f"  form4 xml {k + 1}/{len(todo)}")
-    new = pd.DataFrame(recs).reindex(columns=TX_COLS)
-    out = pd.concat([old, new], ignore_index=True) if old is not None else new
-    out["tx_date"] = pd.to_datetime(out["tx_date"], errors="coerce")
-    out.to_parquet(TX)
-    return out
+    return flush()
 
 
 def load_tx() -> pd.DataFrame | None:
