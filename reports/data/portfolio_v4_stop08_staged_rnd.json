@@ -1,0 +1,57 @@
+{
+  "tag": "v4_stop08",
+  "mode": "staged",
+  "portfolio": {
+    "initial_equity": 100000,
+    "risk_per_trade": 0.005,
+    "max_positions": 10,
+    "max_new_per_day": 3,
+    "max_position_pct": 0.2,
+    "seeds": 20,
+    "order": "random",
+    "idle_asset": "IWM"
+  },
+  "seeds": 20,
+  "summary": {
+    "total_return": {
+      "median": 0.619,
+      "p10": 0.3558,
+      "p90": 0.676
+    },
+    "cagr": {
+      "median": 0.068,
+      "p10": 0.043,
+      "p90": 0.073
+    },
+    "max_drawdown": {
+      "median": -0.584,
+      "p10": -0.657,
+      "p90": -0.576
+    },
+    "sharpe": {
+      "median": 0.36,
+      "p10": 0.3,
+      "p90": 0.38
+    },
+    "trades_taken": {
+      "median": 340.0,
+      "p10": 340.0,
+      "p90": 340.0
+    },
+    "trades_skipped": {
+      "median": 15.0,
+      "p10": 15.0,
+      "p90": 15.0
+    },
+    "yearly_return_median": {
+      "2019": 0.063,
+      "2020": -0.022,
+      "2021": 0.326,
+      "2022": -0.333,
+      "2023": 0.182,
+      "2024": 0.203,
+      "2025": 0.194,
+      "2026": 0.05
+    }
+  }
+}
