@@ -159,7 +159,8 @@ def main():
     need_holders = ((flt.get("holders") or {}).get("require") or "none") != "none"
     need_fund = any((flt.get("fundamentals") or {}).get(k) not in (None, False)
                     for k in ("min_runway_q", "min_rev_yoy", "require_accel", "min_gm_change"))
-    if (flt.get("offering") or {}).get("enabled") or args.catalyst or args.features or need_holders:
+    need_earn = (flt.get("earnings") or {}).get("avoid_before_days") is not None
+    if (flt.get("offering") or {}).get("enabled") or args.catalyst or args.features or need_holders or need_earn:
         f = filings.load()
         if f is None:
             sys.exit("缺少 data/cache/filings.parquet，先跑 scripts/fetch_filings.py")

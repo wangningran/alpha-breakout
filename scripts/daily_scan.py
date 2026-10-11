@@ -170,6 +170,12 @@ def _fmt_pt(x):
     return "—" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 100:+.1f} 点"
 
 
+def _fmt_dte(x):
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return "—"
+    return f"约 {x:.0f} 天" if x >= 0 else f"逾期 {-x:.0f} 天"
+
+
 def _fmt_runway(x):
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "—"
@@ -227,7 +233,8 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     risk_amt = equity * pcfg.get("risk_per_trade", 0.005)
     lines = [f"# 每日扫描 {day.date()}", "",
              f"- 规则：{cfg['surge']['one_day']['min_ret']:.0%} 单日放量或 {cfg['surge']['multi_day']['min_ret']:.0%} 五日涨幅入池；"
-             f"观察 {cfg['watch']['min_days']}–{cfg['watch']['max_days']} 天；创异动以来新高试仓 1/3；{_fund_rule(cfg)}",
+             f"观察 {cfg['watch']['min_days']}–{cfg['watch']['max_days']} 天；创异动以来新高试仓 1/3；{_fund_rule(cfg)}；"
+             f"预计财报前 {((cfg.get('filters') or {}).get('earnings') or {}).get('avoid_before_days')} 天内不试仓",
              f"- 账户 {equity:,.0f} 美元，每笔试仓风险 {risk_amt:,.0f} 美元（1R）",
              "- 价格为复权收盘价。规则只负责找票和管风险，做不做由你研究后决定，并记在 journal/research_log.csv。", ""]
 
@@ -238,15 +245,15 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     if sig.empty:
         lines += ["无", ""]
     else:
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 异动涨幅 | 规则止损 | 止损幅度 | 建议试仓股数 | 营收同比 | 毛利率变化 | 现金跑道 | 催化剂 | 13D新/改/13G | 近期公告 |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 异动涨幅 | 规则止损 | 止损幅度 | 建议试仓股数 | 营收同比 | 毛利率变化 | 距下次财报 | 现金跑道 | 催化剂 | 13D新/改/13G | 近期公告 |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for r in sig.sort_values("ticker").itertuples():
             stop = max(r.low10, r.close * (1 - p["max_stop_pct"]))
             risk = (r.close - stop) / r.close
             shares = int(risk_amt / max(r.close - stop, 1e-9))
             lines.append(
                 f"| {r.ticker} | {r.close:.2f} | {pd.Timestamp(r.surge_date).date()} | {r.days_since_surge} | {r.surge_gain:+.0%} | "
-                f"{stop:.2f} | {risk:.0%} | {shares} | {_fmt_pct(r.rev_yoy)} | {_fmt_pt(r.gm_change)} | {_fmt_runway(r.runway_q)} | "
+                f"{stop:.2f} | {risk:.0%} | {shares} | {_fmt_pct(r.rev_yoy)} | {_fmt_pt(r.gm_change)} | {_fmt_dte(r.days_to_earnings)} | {_fmt_runway(r.runway_q)} | "
                 f"{r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} | "
                 f"{_recent_filings(fil, r.cik, pd.Timestamp(r.surge_date) - pd.Timedelta(days=10))} |")
         lines.append("")
@@ -310,14 +317,14 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
         watch = watch.assign(dist=watch["close"] / watch["surge_high"] - 1).sort_values("dist", ascending=False)
         n_ok = sum(_fund_ok(r, cfg) == "✓" for r in watch.itertuples())
         lines.insert(len(lines) - 1, f"基本面达标（{_fund_rule(cfg)[6:]}）的有 {n_ok} 支，只有这些创新高时才会出现在“可试仓”里。")
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 距最高 | 距作废线 | 基本面 | 营收同比 | 毛利率变化 | 现金跑道 | 催化剂 | 13D新/改/13G |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 距最高 | 距作废线 | 基本面 | 营收同比 | 毛利率变化 | 距下次财报 | 现金跑道 | 催化剂 | 13D新/改/13G |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         watch = watch.assign(fund_ok=[_fund_ok(r, cfg) for r in watch.itertuples()])
         watch = watch.sort_values(["fund_ok", "dist"], ascending=[False, False], key=lambda c: c.map({"✓": 2, "缺数据": 1, "✗": 0}) if c.name == "fund_ok" else c)
         for r in watch.itertuples():
             lines.append(f"| {r.ticker} | {r.close:.2f} | {pd.Timestamp(r.surge_date).date()} | {r.days_since_surge} | "
                          f"{r.dist:+.0%} | {r.close / r.pre_surge_close - 1:+.0%} | {r.fund_ok} | {_fmt_pct(r.rev_yoy)} | "
-                         f"{_fmt_pt(r.gm_change)} | {_fmt_runway(r.runway_q)} | {r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} |")
+                         f"{_fmt_pt(r.gm_change)} | {_fmt_dte(r.days_to_earnings)} | {_fmt_runway(r.runway_q)} | {r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} |")
         lines.append("")
     path = out_dir / f"{day.date()}.md"
     path.write_text("\n".join(lines), encoding="utf-8")

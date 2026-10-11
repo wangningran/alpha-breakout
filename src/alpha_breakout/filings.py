@@ -150,3 +150,26 @@ def refresh_companies(ciks, since: str = "2018-06-01", log=print) -> pd.DataFram
     out = _save(parts)
     log(f"filings refreshed for {len(ciks)} companies")
     return out
+
+
+def earnings_dates(f: pd.DataFrame | None) -> pd.DatetimeIndex:
+    """历史财报发布日：8-K 且 item 含 2.02（Results of Operations），去重排序。"""
+    if f is None or f.empty:
+        return pd.DatetimeIndex([])
+    m = f["form"].str.startswith("8-K") & f["items"].str.contains("2.02", regex=False)
+    return pd.DatetimeIndex(sorted(set(f.loc[m, "date"])))
+
+
+def days_to_next_earnings(ed: pd.DatetimeIndex, date, default_gap: int = 91) -> float:
+    """按 date 当天已知的财报日推算下一次财报，返回还有多少个日历日（可能为负 = 已过预计日期但还没发）。
+
+    预计间隔 = 最近 4 次财报间隔的中位数（不足时用 91 天）。没有历史财报返回 NaN。
+    """
+    date = pd.Timestamp(date)
+    past = ed[ed <= date]
+    if len(past) == 0:
+        return float("nan")
+    gaps = pd.Series(past[-5:]).diff().dt.days.dropna()
+    gaps = gaps[(gaps > 45) & (gaps < 200)]  # 去掉同季度重复的 2.02（更正、补充公告）
+    gap = float(gaps.median()) if len(gaps) else default_gap
+    return float((past[-1] + pd.Timedelta(days=gap) - date).days)

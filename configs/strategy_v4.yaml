@@ -88,6 +88,9 @@ filters:
     allow_missing: false         # 缺数据（没有营收 / 没有财报）时不放行
   momentum:
     max_rs60: null               # 试仓日 60 日相对 IWM 的超额涨幅上限（0.5 = 50%）；null = 不检查
+  earnings:                      # 财报前不试仓（按历史 8-K item 2.02 发布日推算下次财报）
+    avoid_before_days: 14        # 预计下次财报前 14 个日历日内不试仓（≈ 10 个交易日的试仓验证期，保证验证在财报前走完）；null = 不检查
+    overdue_days: 0              # 已过预计日期但还没发布的前 N 天也不试仓
   catalyst:                      # 按异动日前 3 天到后 1 天的公告类别排除
     exclude: []                  # 可选：offering, earnings, agreement, 13d_stake, reg_fd, other_event, none ...
 

@@ -12,6 +12,9 @@
     allow_missing: true     # 缺数据时是否放行
   momentum:
     max_rs60: null          # 试仓日 60 日相对 IWM 超额涨幅上限（0.5 = 50%），排除涨得太远的；null = 不检查
+  earnings:
+    avoid_before_days: null # 预计下次财报前 N 个日历日内不试仓（按历史 8-K item 2.02 推算）；null = 不检查
+    overdue_days: 0         # 已过预计财报日、但还没发布的前 N 天也不试仓（财报随时可能出来）
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from . import fundamentals as fmod
-from .filings import holder_features
+from .filings import days_to_next_earnings, earnings_dates, holder_features
 
 
 def trade_features(fil: pd.DataFrame | None, ftab: pd.DataFrame | None, surge_date, signal_date,
@@ -27,6 +30,7 @@ def trade_features(fil: pd.DataFrame | None, ftab: pd.DataFrame | None, surge_da
     d = {}
     d.update(holder_features(fil, surge_date, signal_date, before_days))
     d.update(fmod.features_at(ftab, signal_date))
+    d["days_to_earnings"] = days_to_next_earnings(earnings_dates(fil), signal_date)
     return d
 
 
@@ -49,7 +53,10 @@ def make_entry_filter(cfg: dict, fil: pd.DataFrame | None, ftab: pd.DataFrame | 
     need_h = h.get("require", "none") not in (None, "none")
     need_f = any(fu.get(k) not in (None, False) for k in ("min_runway_q", "min_rev_yoy", "require_accel", "min_gm_change"))
     need_m = mo.get("max_rs60") is not None and close is not None and bench is not None
-    if not need_h and not need_f and not need_m:
+    ea = f.get("earnings") or {}
+    need_e = ea.get("avoid_before_days") is not None
+    ed = earnings_dates(fil) if need_e else None
+    if not need_h and not need_f and not need_m and not need_e:
         return None
     allow_missing = fu.get("allow_missing", True)
     bench_aligned = bench.reindex(close.index).ffill() if need_m else None
@@ -97,6 +104,10 @@ def make_entry_filter(cfg: dict, fil: pd.DataFrame | None, ftab: pd.DataFrame | 
         if need_m:
             v = rs_at(close, bench_aligned, date, 60)
             if not np.isnan(v) and v > mo["max_rs60"]:
+                return False
+        if need_e:
+            v = days_to_next_earnings(ed, date)
+            if not np.isnan(v) and -ea.get("overdue_days", 0) <= v <= ea["avoid_before_days"]:
                 return False
         return True
 
