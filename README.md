@@ -51,7 +51,8 @@ python scripts/fetch_filings.py
 python scripts/fetch_fundamentals.py
 python scripts/backtest.py --tag v4 --features        # 默认 configs/strategy_v4.yaml
 python scripts/portfolio.py --tag v4
-python scripts/daily_scan.py                         # 每天收盘后
+python scripts/daily_scan.py                         # 每天收盘后（已设定时任务，每个交易日美东 17:47 自动运行并推送到 main）
+python scripts/daily_scan.py --bootstrap             # 全新环境：只下载扫描需要的数据，约 10 分钟
 python scripts/evaluate_journal.py
 python scripts/backtest.py --config configs/strategy_v1.yaml --tag v1
 python scripts/backtest.py --tag v4_atr --set position.exit_mode=atr   # 改单个参数
