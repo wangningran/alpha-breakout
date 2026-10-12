@@ -1,0 +1,2 @@
+scan_date,ticker,surge_date,signal_date,close,rule_stop,catalyst,new_13d,amend_13d,new_13g,rev_yoy,gm_change,runway_q,decision,reason,notes
+2026-10-12,FIGS,2026-08-07,2026-10-12,17.74,15.079,earnings,0,0,1,0.2881223794549266,0.08213671715475912,inf,,,
