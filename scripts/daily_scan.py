@@ -295,7 +295,9 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
         lines += ["| 代码 | 状态 | 入场日 | 入场价 | 收盘 | 止损 | 明天动作 |", "| --- | --- | --- | --- | --- | --- | --- |"]
         act_name = {"add": "加仓到满仓", "partial": "分批止盈", "exit": "清仓", None: "持有"}
         for r in pos.sort_values("ticker").itertuples():
-            act = act_name.get(r.pending, r.pending) + (f"（{r.pending_reason}）" if r.pending_reason else "")
+            pend = None if pd.isna(r.pending) else r.pending  # DataFrame 里 None 会变成 NaN
+            reason = "" if pd.isna(r.pending_reason) else r.pending_reason
+            act = act_name.get(pend, pend) + (f"（{reason}）" if reason else "")
             lines.append(f"| {r.ticker} | {'试仓' if r.state == 'probe' else '满仓'} | {pd.Timestamp(r.entry_date).date()} | "
                          f"{r.entry:.2f} | {r.close:.2f} | {r.stop:.2f} | {act} |")
         lines.append("")
