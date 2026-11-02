@@ -1,6 +1,6 @@
-# v0b：只改一处 —— 低波动条件从“突破前一天”改为“过去 60 日内出现过”。
-# 来源：PRME / SDGR 复盘里，放量突破前几天波动率已经抬升，v0 的 prev_day 检查把所有突破都挡掉了。
-# 其余参数与 scanner_v0.yaml 相同；scripts/event_study.py --config configs/scanner_v0b.yaml 使用。
+# v0b: only one change -- the low-volatility condition goes from "the day before the breakout" to "occurred at some point in the past 60 days".
+# Why: in the PRME / SDGR reviews, volatility had already risen in the days before the high-volume breakout, so v0's prev_day check blocked every breakout.
+# All other parameters are the same as scanner_v0.yaml; used via scripts/event_study.py --config configs/scanner_v0b.yaml.
 liquidity:
   min_price: 1.0
   min_dollar_volume: 2000000

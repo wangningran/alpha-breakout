@@ -1,11 +1,11 @@
-# 事件复盘样本。manual_day0 填了就以手工起涨日为准（会和自动识别的结果一起列出）。
+# Event-review samples. If manual_day0 is filled in, the manual surge-start day takes precedence (it is listed alongside the automatically detected one).
 start: "2020-01-01"
 samples:
   - ticker: PRME
     name: Prime Medicine
-    theme: 基因编辑，低价押注催化剂
+    theme: Gene editing, low-priced bet on a catalyst
     manual_day0: []
   - ticker: SDGR
     name: Schrödinger
-    theme: AI 制药题材联动
+    theme: AI drug discovery theme momentum
     manual_day0: []

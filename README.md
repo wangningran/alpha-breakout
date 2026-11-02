@@ -1,68 +1,68 @@
 # alpha-breakout
 
-美股全行业小盘股「异动 → 观察 → 试仓 → 加仓」策略研究。策略思路和待办见 [STRATEGY.md](STRATEGY.md)，阶段报告在 `reports/`。
+Strategy research on US small caps across all sectors: "surge → watch → probe → add". Strategy ideas and to-dos are in [STRATEGY.md](STRATEGY.md); phase reports are in `reports/`.
 
-## 环境
+## Environment
 
 ```bash
 pip install -r requirements.txt
-export SEC_USER_AGENT="你的名字 你的邮箱"   # SEC EDGAR 要求带联系方式
+export SEC_USER_AGENT="Your Name your@email.com"   # SEC EDGAR requires contact info
 ```
 
-网络需要放行 `query1.finance.yahoo.com`（行情）和 `data.sec.gov`、`www.sec.gov`（公告）。
+The network must allow `query1.finance.yahoo.com` (prices) and `data.sec.gov`, `www.sec.gov` (filings).
 
-## 结构
+## Structure
 
 ```
-configs/strategy_v4.yaml   策略 v4 参数（当前默认：营收 ≥ 20% + 毛利率提升 + 3R 分批止盈 + 闲置资金买 IWM）
-configs/strategy_v3.yaml   策略 v3 参数（营收 ≥ 50% + 现金跑道 ≥ 4 季 + 3R 分批止盈）
-configs/strategy_v2.yaml   策略 v2 参数（v1 + 数据清洗 + 增发过滤 + 催化剂标签）
-configs/strategy_v1.yaml   策略 v1 参数（异动 / 观察 / 试仓 / 加仓 / 出场）
-configs/scanner_v0.yaml    旧版平台突破扫描器 v0 参数（已被 v1 替换）
-configs/scanner_v0b.yaml   v0b：低波动条件改为“60 日内出现过”
-configs/samples.yaml       事件复盘样本（可手工指定起涨日 manual_day0）
+configs/strategy_v4.yaml   Strategy v4 parameters (current default: revenue ≥ 20% + gross margin improvement + 3R partial take-profit + idle cash in IWM)
+configs/strategy_v3.yaml   Strategy v3 parameters (revenue ≥ 50% + cash runway ≥ 4 quarters + 3R partial take-profit)
+configs/strategy_v2.yaml   Strategy v2 parameters (v1 + data cleaning + offering filter + catalyst tags)
+configs/strategy_v1.yaml   Strategy v1 parameters (surge / watch / probe / add / exit)
+configs/scanner_v0.yaml    Old base-breakout scanner v0 parameters (replaced by v1)
+configs/scanner_v0b.yaml   v0b: low-volatility condition changed to "occurred within 60 days"
+configs/samples.yaml       Event-review samples (the surge-start day can be set manually via manual_day0)
 src/alpha_breakout/
-  data.py                  yfinance 日线拉取 + data/cache/prices/ 本地缓存（含批量下载）
-  universe.py              全市场股票池（SEC 列表）+ 按时点股本估算市值
-  strategy.py              状态机回测（staged 分批 / immediate 对照）
-  filings.py               全市场 SEC 公告索引、增发表格、催化剂分类、13D/13G 计数
-  fundamentals.py          SEC XBRL 季度基本面（营收、净利润、现金），按时点取值
-  research.py              试仓前检查（13D/13G、基本面）和交易特征
-  portfolio.py             组合层面模拟（资金、仓位上限、盯市）
-  insiders.py              内部人交易（Form 4）列表与解析
-  scanner.py               逐日计算指标 + v0 规则判定
-  event_study.py           大涨段识别（zigzag）、day 0 对齐、窗口统计
-  sec.py                   SEC EDGAR 公告列表
-scripts/build_universe.py  建股票池并下载全市场行情（首次约 25 分钟）
-scripts/fetch_filings.py   拉全市场 SEC 公告索引（首次约 15 分钟）
-scripts/fetch_fundamentals.py  拉全市场季度基本面（首次约 10 分钟）
-scripts/backtest.py        全市场回测（--config 选 v1 / v2 / v3），输出到 reports/data/
-scripts/portfolio.py       组合模拟（读回测输出的交易；支持信号排序、闲置资金买 IWM）
-scripts/walk_forward.py    分段验证：训练期挑过滤条件，测试期检验
-scripts/fetch_insiders.py  拉回测交易相关窗口内的 Form 4（约 50 分钟）
-scripts/daily_scan.py      每日扫描：输出 reports/daily/<日期>.md，并追加研究日志
-scripts/evaluate_journal.py  评估研究日志（做 / 不做 两组之后的表现）
-scripts/event_study.py     v0 样本复盘（第一阶段）
+  data.py                  yfinance daily bars + local cache in data/cache/prices/ (with bulk download)
+  universe.py              Full-market stock universe (SEC list) + point-in-time market cap estimate from share count
+  strategy.py              State-machine backtest (staged scale-in / immediate control)
+  filings.py               Full-market SEC filing index, offering forms, catalyst classification, 13D/13G counts
+  fundamentals.py          SEC XBRL quarterly fundamentals (revenue, net income, cash), point-in-time values
+  research.py              Pre-probe checks (13D/13G, fundamentals) and trade features
+  portfolio.py             Portfolio-level simulation (capital, position caps, mark-to-market)
+  insiders.py              Insider transactions (Form 4) listing and parsing
+  scanner.py               Daily indicator computation + v0 rule evaluation
+  event_study.py           Big-move detection (zigzag), day 0 alignment, window statistics
+  sec.py                   SEC EDGAR filing list
+scripts/build_universe.py  Build the stock universe and download full-market prices (about 25 minutes the first time)
+scripts/fetch_filings.py   Fetch the full-market SEC filing index (about 15 minutes the first time)
+scripts/fetch_fundamentals.py  Fetch full-market quarterly fundamentals (about 10 minutes the first time)
+scripts/backtest.py        Full-market backtest (--config picks v1 / v2 / v3), output to reports/data/
+scripts/portfolio.py       Portfolio simulation (reads trades from the backtest output; supports signal ordering, idle cash in IWM)
+scripts/walk_forward.py    Walk-forward validation: pick filters in the training period, test in the test period
+scripts/fetch_insiders.py  Fetch Form 4s in windows around backtest trades (about 50 minutes)
+scripts/daily_scan.py      Daily scan: writes reports/daily/<date>.md and appends to the research journal
+scripts/evaluate_journal.py  Evaluate the research journal (subsequent performance of the do / skip groups)
+scripts/event_study.py     v0 sample review (phase 1)
 ```
 
-## 用法
+## Usage
 
 ```bash
 python scripts/build_universe.py
 python scripts/fetch_filings.py
 python scripts/fetch_fundamentals.py
-python scripts/backtest.py --tag v4 --features        # 默认 configs/strategy_v4.yaml
+python scripts/backtest.py --tag v4 --features        # defaults to configs/strategy_v4.yaml
 python scripts/portfolio.py --tag v4
-python scripts/daily_scan.py                         # 每天收盘后（已设定时任务，每个交易日美东 17:47 自动运行并推送到 main）
-python scripts/daily_scan.py --bootstrap             # 全新环境：只下载扫描需要的数据，约 10 分钟
+python scripts/daily_scan.py                         # after each close (scheduled task runs automatically every trading day at 17:47 US Eastern and pushes to main)
+python scripts/daily_scan.py --bootstrap             # fresh environment: downloads only the data the scan needs, about 10 minutes
 python scripts/evaluate_journal.py
 python scripts/backtest.py --config configs/strategy_v1.yaml --tag v1
-python scripts/backtest.py --tag v4_atr --set position.exit_mode=atr   # 改单个参数
+python scripts/backtest.py --tag v4_atr --set position.exit_mode=atr   # change a single parameter
 python scripts/event_study.py --tag v0
 python scripts/event_study.py --config configs/scanner_v0b.yaml --tag v0b
 ```
 
-在代码里使用：
+Using it from code:
 
 ```python
 from alpha_breakout.data import get_daily

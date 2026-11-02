@@ -1,105 +1,105 @@
-# 策略 v4（当前候选）= v2 + 基本面检查（营收同比 ≥ 20%、毛利率同比提升 ≥ 2 个点）+ 3R 分批止盈
-#                     + 组合：闲置资金买入 IWM（指数 + 策略的混合方案）
-# 选择依据：只用 2019–2022 年挑选参数，2023–2026 年验证（见 reports/2026-10-10_phase5_validation_hybrid.md）
-# 窗口单位都是交易日；信号都在收盘后判断，次日开盘执行。
+# Strategy v4 (current candidate) = v2 + fundamentals check (revenue YoY ≥ 20%, YoY gross margin improvement ≥ 2 points) + 3R partial take-profit
+#                     + portfolio: buy IWM with idle cash (index + strategy hybrid)
+# Selection basis: parameters chosen using only 2019–2022, validated on 2023–2026 (see reports/2026-10-10_phase5_validation_hybrid.md)
+# All window units are trading days; signals are evaluated after the close and executed at the next day's open.
 
 universe:
-  min_price: 1.0                 # 当时真实收盘价（未做拆股调整）
-  min_mcap: 100000000            # 1 亿美元
-  max_mcap: 3000000000           # 30 亿美元
-  min_dollar_volume: 2000000     # 20 日平均成交额（含异动日）
+  min_price: 1.0                 # Actual close at the time (not split-adjusted)
+  min_mcap: 100000000            # $100 million
+  max_mcap: 3000000000           # $3 billion
+  min_dollar_volume: 2000000     # 20-day average dollar volume (including the surge day)
   dollar_volume_window: 20
 
-surge:                           # 入池：满足任意一条
+surge:                           # Enter the watchlist: meet any one condition
   one_day:
-    min_ret: 0.12                # 单日涨幅 ≥ 12%
-    min_vol_ratio: 3.0           # 且成交量 ≥ 50 日均量 3 倍
+    min_ret: 0.12                # One-day gain ≥ 12%
+    min_vol_ratio: 3.0           # and volume ≥ 3x the 50-day average volume
   multi_day:
     window: 5
-    min_ret: 0.30                # 或 5 日涨幅 ≥ 30%
+    min_ret: 0.30                # or 5-day gain ≥ 30%
   vol_avg_window: 50
 
 watch:
-  max_days: 90                   # 入池后最多观察 90 个交易日
-  min_days: 10                   # 至少观察 10 天才允许试仓
-  invalidate: pre_surge_close    # 收盘跌回异动前的价格 = 异动作废，出池
+  max_days: 90                   # Watch for at most 90 trading days after entering the watchlist
+  min_days: 10                   # Watch for at least 10 days before a probe is allowed
+  invalidate: pre_surge_close    # Close falls back to the pre-surge price = surge invalidated, removed from the watchlist
   invalidate_buffer: 0.0
-  max_attempts: 2                # 试仓失败后（异动仍有效）可以再等一次新高，最多试 2 次
+  max_attempts: 2                # After a failed probe (surge still valid), can wait for another new high; at most 2 attempts
 
-entry:                           # 试仓触发：观察期满后，收盘创“异动以来新高”
-  new_high_lookback: since_surge # 和异动以来的最高收盘比
-  near_high_pct: 0.0             # 0 = 必须创新高；0.05 = 距新高 5% 以内也算
-  min_vol_ratio: 1.5             # 当天量比
-  max_vol_ratio: null            # 当天量比上限（例如 3.6 = 不在放天量那天追）；null = 不限
-  require_above_ma: 20           # 收盘在 20 日均线上方
-  require_ma_rising: true        # 且 20 日均线比 5 天前高
+entry:                           # Probe trigger: after the watch period, close at a "new high since the surge"
+  new_high_lookback: since_surge # Compared with the highest close since the surge
+  near_high_pct: 0.0             # 0 = must make a new high; 0.05 = within 5% of the high also counts
+  min_vol_ratio: 1.5             # Volume ratio on the day
+  max_vol_ratio: null            # Cap on the day's volume ratio (e.g. 3.6 = don't chase on a day of extreme volume); null = no cap
+  require_above_ma: 20           # Close above the 20-day moving average
+  require_ma_rising: true        # and the 20-day moving average is higher than 5 days ago
 
-market:                          # 大盘过滤（只影响开新仓）
+market:                          # Market filter (only affects opening new positions)
   enabled: false
   ticker: IWM
-  ma: 200                        # IWM 收盘在 200 日均线上方才试仓
+  ma: 200                        # Probe only when IWM closes above its 200-day moving average
 
 position:
-  probe_size: 0.333              # 试仓 1/3
-  add_size: 0.667                # 验证后加到满仓
-  stop_lookback: 10              # 初始止损 = 近 10 日最低点
-  max_stop_pct: 0.15             # 但最多亏 15%（止损不低于入场价 × 0.85）
-  add_trigger_r: 1.0             # 试仓浮盈达到 1R（收盘）就加仓
-  probe_max_days: 10             # 试仓 10 天内没到 1R 就出局（2026-10-11 由 20 改为 10：两段回测都更好）
-  breakeven_after_add: false     # true = 加仓后止损上移到试仓成本（PRME 测试里太紧，容易被盘中针扫掉）
-  exit_mode: ma                  # ma = 收盘跌破均线出场；atr = 最高收盘 - atr_mult × ATR 的跟踪止损（盘中触发）
-  trail_ma: 20                   # exit_mode=ma 时：加仓后收盘跌破 20 日均线出场
+  probe_size: 0.333              # Probe 1/3
+  add_size: 0.667                # Add to full position after validation
+  stop_lookback: 10              # Initial stop = lowest low of the last 10 days
+  max_stop_pct: 0.15             # but lose at most 15% (stop no lower than entry price × 0.85)
+  add_trigger_r: 1.0             # Add once the probe's unrealized gain reaches 1R (on the close)
+  probe_max_days: 10             # Exit if the probe does not reach 1R within 10 days (changed from 20 to 10 on 2026-10-11: better in both backtest periods)
+  breakeven_after_add: false     # true = after the add, move the stop up to the probe cost (too tight in the PRME test, easily wicked out intraday)
+  exit_mode: ma                  # ma = exit on a close below the moving average; atr = trailing stop at highest close - atr_mult × ATR (triggered intraday)
+  trail_ma: 20                   # When exit_mode=ma: after the add, exit on a close below the 20-day moving average
   atr_window: 14
   atr_mult: 3.0
-  partial_r: 3                   # 收盘浮盈达到 3R，次日开盘卖出 partial_frac；null = 不分批止盈
+  partial_r: 3                   # When the unrealized gain reaches 3R on the close, sell partial_frac at the next day's open; null = no partial take-profit
   partial_frac: 0.5
-  after_partial_trail_ma: 50     # 分批止盈后剩余仓位改用 50 日均线跟踪；null = 不变
+  after_partial_trail_ma: 50     # After the partial take-profit, trail the remainder with the 50-day moving average; null = unchanged
   max_hold_days: 120
-  slippage: 0.005                # 每次成交单边滑点 0.5%
+  slippage: 0.005                # One-way slippage of 0.5% per fill
 
 backtest:
   start: "2019-06-01"
   end: null
 
-clean:                           # 数据清洗：排除异动前不可交易的票
+clean:                           # Data cleaning: exclude stocks that were not tradable before the surge
   enabled: true
-  min_history_days: 120          # 有行情的交易日 ≥ 120（新股上市不满半年不做）
-  pre_surge_dollar_volume: 1000000   # 异动前 20 日平均成交额 ≥ 100 万美元
-  max_zero_volume_days: 2        # 异动前 20 日里零成交的天数 ≤ 2
-                                 # 另外：试仓当天 20 日平均成交额也要 ≥ universe.min_dollar_volume
+  min_history_days: 120          # Trading days with price data ≥ 120 (skip new listings under half a year old)
+  pre_surge_dollar_volume: 1000000   # 20-day average dollar volume before the surge ≥ $1 million
+  max_zero_volume_days: 2        # Zero-volume days in the 20 days before the surge ≤ 2
+                                 # Also: the 20-day average dollar volume on the probe day must be ≥ universe.min_dollar_volume
 
 filters:
-  offering:                      # 增发过滤（SEC 公告）
+  offering:                      # Offering filter (SEC filings)
     enabled: true
-    forms: [424B1, 424B4, 424B5, S-1, S-1/A, F-1, F-1/A]   # 实际发行 / 定价 / 新发行注册
-    shelf_forms: [S-3, F-3]      # 储架注册（只是“准备好可以发”）
+    forms: [424B1, 424B4, 424B5, S-1, S-1/A, F-1, F-1/A]   # Actual issuance / pricing / new issuance registration
+    shelf_forms: [S-3, F-3]      # Shelf registration (only "ready to issue")
     include_shelf: false
-    lookback_days: 5             # 异动日前 5 天内（日历日）有增发公告也算
-    during_watch: false          # true = 观察期内出现增发公告也作废（回测里更差，默认只看异动前后）
-    exit_on_offering: false      # true = 持仓中出现增发公告，次日开盘出场
-  holders:                       # 大股东申报检查（试仓前）
+    lookback_days: 5             # An offering filing within 5 days (calendar days) before the surge day also counts
+    during_watch: false          # true = an offering filing during the watch period also invalidates (worse in backtests; by default only around the surge is checked)
+    exit_on_offering: false      # true = if an offering filing appears while holding, exit at the next day's open
+  holders:                       # Major-holder filing check (before the probe)
     require: none                # none / new_13d / any_13d / any_13d_or_13g
-    before_days: 30              # 从异动前 30 天算到试仓信号日
-  fundamentals:                  # 基本面检查（试仓前，用当时已披露的财报）
-    min_runway_q: null           # 亏损公司现金至少撑几个季度，例如 4；null = 不检查
-    min_rev_yoy: 0.2             # 最近季度营收同比 ≥ 20%；null = 不检查
-    require_accel: false         # 要求营收增速加快
-    min_gm_change: 0.02          # 毛利率同比至少提高 2 个百分点；null = 不检查
-    allow_missing: false         # 缺数据（没有营收 / 没有财报）时不放行
+    before_days: 30              # Counted from 30 days before the surge to the probe signal day
+  fundamentals:                  # Fundamentals check (before the probe, using earnings already disclosed at the time)
+    min_runway_q: null           # Minimum number of quarters cash must last at loss-making companies, e.g. 4; null = no check
+    min_rev_yoy: 0.2             # Latest quarter revenue YoY ≥ 20%; null = no check
+    require_accel: false         # Require accelerating revenue growth
+    min_gm_change: 0.02          # YoY gross margin must improve by at least 2 percentage points; null = no check
+    allow_missing: false         # Block when data is missing (no revenue / no earnings)
   momentum:
-    max_rs60: null               # 试仓日 60 日相对 IWM 的超额涨幅上限（0.5 = 50%）；null = 不检查
-  earnings:                      # 财报前不试仓（按历史 8-K item 2.02 发布日推算下次财报）
-    avoid_before_days: 14        # 预计下次财报前 14 个日历日内不试仓（≈ 10 个交易日的试仓验证期，保证验证在财报前走完）；null = 不检查
-    overdue_days: 0              # 已过预计日期但还没发布的前 N 天也不试仓
-  catalyst:                      # 按异动日前 3 天到后 1 天的公告类别排除
-    exclude: []                  # 可选：offering, earnings, agreement, 13d_stake, reg_fd, other_event, none ...
+    max_rs60: null               # Cap on the 60-day excess return vs. IWM on the probe day (0.5 = 50%); null = no check
+  earnings:                      # No probe before earnings (next earnings estimated from historical 8-K item 2.02 filing dates)
+    avoid_before_days: 14        # No probe within 14 calendar days before the expected next earnings (≈ the 10-trading-day probe validation period, so validation finishes before earnings); null = no check
+    overdue_days: 0              # Also no probe for the first N days after the expected date has passed without a release
+  catalyst:                      # Exclude by filing category from 3 days before to 1 day after the surge day
+    exclude: []                  # Options: offering, earnings, agreement, 13d_stake, reg_fd, other_event, none ...
 
-portfolio:                       # 组合模拟（scripts/portfolio.py）
+portfolio:                       # Portfolio simulation (scripts/portfolio.py)
   initial_equity: 100000
-  risk_per_trade: 0.005          # 每笔试仓承担账户 0.5% 的风险（= 1R）
-  max_positions: 10              # 最多同时持有 10 支
-  max_new_per_day: 3             # 每天最多开 3 笔新试仓
-  max_position_pct: 0.20         # 单支满仓市值不超过账户 20%
-  order: rs60_asc                # 同一天信号多于名额时：random / rs60_asc（涨得少的优先）/ gm_change_desc / rev_yoy_desc
-  idle_asset: IWM                # 闲置现金买入 IWM（指数 + 策略的混合方案）；null = 闲置现金不计息
+  risk_per_trade: 0.005          # Each probe risks 0.5% of the account (= 1R)
+  max_positions: 10              # Hold at most 10 stocks at once
+  max_new_per_day: 3             # Open at most 3 new probes per day
+  max_position_pct: 0.20         # A single stock's full position value is at most 20% of the account
+  order: rs60_asc                # When signals on a day exceed available slots: random / rs60_asc (smaller gainers first) / gm_change_desc / rev_yoy_desc
+  idle_asset: IWM                # Buy IWM with idle cash (index + strategy hybrid); null = idle cash earns nothing
   seeds: 20

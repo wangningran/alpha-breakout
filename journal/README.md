@@ -1,11 +1,11 @@
-# 研究日志
+# Research journal
 
-`scripts/daily_scan.py` 每天会把"可试仓"的票追加到 `research_log.csv`，前面几列由规则自动填好，后面三列由你填写：
+Every day `scripts/daily_scan.py` appends the "Probe candidates" stocks to `research_log.csv`. The first columns are filled in automatically by the rules; you fill in the last three:
 
-| 列 | 填什么 |
+| Column | What to enter |
 | --- | --- |
-| decision | `做` / `不做`（也可以填 `观望`，评估时按“不做”算） |
-| reason | 一句话理由，例如“合作方是大药企，有 13D 入股”“刚增发完，现金流差” |
-| notes | 其他备注，可空 |
+| decision | `do` / `skip` (you can also enter `wait`; it counts as "skip" in the evaluation) |
+| reason | A one-sentence reason, e.g. "partner is a big pharma company, 13D stake filed", "just finished an offering, weak cash flow" |
+| notes | Other notes, optional |
 
-几个月后跑 `python scripts/evaluate_journal.py`，比较“做”和“不做”两组之后的实际表现，判断人工研究有没有增益。
+After a few months, run `python scripts/evaluate_journal.py` to compare how the "do" and "skip" groups actually performed afterwards and judge whether manual research adds value.

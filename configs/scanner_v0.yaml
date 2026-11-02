@@ -1,32 +1,32 @@
-# 突破扫描器 v0 参数（对应 STRATEGY.md 第 3 节），后续回测校准时只改这里。
-# 所有窗口单位都是交易日；所有“过去 N 日”都不含信号当天。
+# Breakout scanner v0 parameters (see STRATEGY.md section 3); later backtest calibration only changes this file.
+# All window units are trading days; every "past N days" excludes the signal day.
 
 liquidity:
-  min_price: 1.0              # 收盘价 > 1 美元（原 2 美元，2026-10-10 用户放宽）
-  min_dollar_volume: 2000000   # 20 日平均成交额 > 200 万美元
+  min_price: 1.0              # Close > $1 (originally $2, relaxed by the user on 2026-10-10)
+  min_dollar_volume: 2000000   # 20-day average dollar volume > $2 million
   dollar_volume_window: 20
 
-consolidation:                # 横盘：任意一个回看窗口满足即可
+consolidation:                # Consolidation base: any one lookback window is enough
   base_lookbacks: [60, 90, 120]
-  max_base_range: 0.60        # 横盘区 (最高/最低 - 1) 上限
-  vol_window: 20              # 20 日年化波动率
-  vol_rank_lookback: 252      # 和过去 252 日的 20 日波动率比
-  max_vol_percentile: 0.35    # 波动率分位 ≤ 35% 算“历史低位”
-  vol_check: prev_day         # prev_day = 看突破前一天；min_in_base = 看过去 vol_check_window 日的最低分位
+  max_base_range: 0.60        # Upper limit on the base range (high/low - 1)
+  vol_window: 20              # 20-day annualized volatility
+  vol_rank_lookback: 252      # Compared with the 20-day volatility over the past 252 days
+  max_vol_percentile: 0.35    # Volatility percentile ≤ 35% counts as "historically low"
+  vol_check: prev_day         # prev_day = check the day before the breakout; min_in_base = lowest percentile over the past vol_check_window days
   vol_check_window: 60
 
-breakout:                     # 满足其一：突破横盘上沿 或 突破 52 周高点
+breakout:                     # Either one: break above the base high or above the 52-week high
   use_base_high: true
   use_52w_high: true
   high_lookback: 252
-  price_field: High           # 横盘上沿 / 52 周高点用 High 还是 Close
+  price_field: High           # Whether the base high / 52-week high uses High or Close
 
 volume:
   avg_window: 50
-  min_volume_mult: 3.0        # 成交量 ≥ 50 日均量 3 倍
-  min_close_location: 0.667   # (收-低)/(高-低) ≥ 2/3，收在当日振幅上 1/3
+  min_volume_mult: 3.0        # Volume ≥ 3x the 50-day average volume
+  min_close_location: 0.667   # (close-low)/(high-low) ≥ 2/3, close in the top 1/3 of the day's range
 
 relative_strength:
   benchmark: XBI
   window: 20
-  min_excess_return: 0.0      # 近 20 日收益 - XBI 近 20 日收益 > 0
+  min_excess_return: 0.0      # 20-day return - XBI 20-day return > 0

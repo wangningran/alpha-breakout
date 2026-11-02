@@ -1,168 +1,168 @@
-# Alpha Breakout 策略笔记
+# Alpha Breakout Strategy Notes
 
-> 目标：美股全行业小盘股。一段暴涨之后先观察，趋势保持才小仓位试，验证成功再加仓。重赔率，不重胜率。
-> 本文件记录与用户问答的结论，新会话从这里接着做。
+> Goal: US small caps across all sectors. After a sharp run-up, watch first; only if the trend holds, try a small probe, and add after it is validated. Focus on payoff ratio, not win rate.
+> This file records the conclusions from Q&A with the user; new sessions pick up from here.
 
-## 1. 已确认的方向
+## 1. Confirmed direction
 
-| 项目 | 结论 |
+| Item | Conclusion |
 | --- | --- |
-| 市场 | 美股（港股、A 股暂不做） |
-| 范围 | 全行业小盘股（2026-10-10 由“生物科技 / AI 制药”扩大） |
-| 主线 | **异动 → 观察 → 试仓 → 加仓**（2026-10-10 替换原来的“平台突破首日”） |
-| 第二波 | 异动后先回落、过一段时间再起来的情况也要能抓到 |
-| 风格 | 低胜率（预期 20–35%）、高赔率；小仓位、多次出手 |
-| 回测股票池 | 只用现在还在交易的股票，不需要退市股（用户确认，接受幸存者偏差） |
+| Market | US stocks (Hong Kong and China A-shares are out for now) |
+| Scope | Small caps across all sectors (expanded from "biotech / AI drug discovery" on 2026-10-10) |
+| Main line | **surge → watch → probe → add** (replaced the original "first day of a base breakout" on 2026-10-10) |
+| Second wave | Must also catch cases where the stock pulls back after the surge and then rises again some time later |
+| Style | Low win rate (expected 20–35%), high payoff ratio; small positions, many attempts |
+| Backtest universe | Only stocks still trading today; delisted stocks not needed (confirmed by the user, survivorship bias accepted) |
 
-用户原话：“一个小盘股一段暴涨之后，我们捕捉到，然后开始研究，之后比如说一段时间内，它仍然保持向上趋势，那我们就可以小仓位验证，验证成功后加仓。”
+The user's own words: "When a small cap has a sharp run-up, we catch it and start researching it. Then if, say, it keeps trending up over some period, we can validate with a small position, and add after the validation succeeds."
 
-## 2. 参考样本
+## 2. Reference samples
 
-| 代码 | 公司 | 在 v1 下的结果 |
+| Ticker | Company | Result under v1 |
 | --- | --- | --- |
-| PRME | Prime Medicine | 2025-06-06 异动 → 6-23 试仓 → 6-27 加仓 → 7-30 出场，+52%（10.4R） |
-| SDGR | Schrödinger | 2023-03-01 异动 → 第 56 天（5-19）第二波试仓 → 5-23 加仓 → 7-25 出场，+34%（6.8R） |
-| 1873.HK | 维亚生物 | 港股，仅作逻辑参考 |
+| PRME | Prime Medicine | 2025-06-06 surge → 6-23 probe → 6-27 add → 7-30 exit, +52% (10.4R) |
+| SDGR | Schrödinger | 2023-03-01 surge → day 56 (5-19) second-wave probe → 5-23 add → 7-25 exit, +34% (6.8R) |
+| 1873.HK | Viva Biotech | Hong Kong stock, logic reference only |
 
-用户还有其他样本没给，补充时请附上起涨时间段。
+The user has other samples not yet provided; when adding them, please include the period of the run-up.
 
-## 3. 规则（当前候选 v4，参数在 `configs/strategy_v4.yaml`）
+## 3. Rules (current candidate v4, parameters in `configs/strategy_v4.yaml`)
 
-所有判断都用收盘后的数据，次日开盘执行。
+All decisions use data after the close and are executed at the next day's open.
 
-1. **股票池**：当时真实股价 ≥ 1 美元；市值 1–30 亿美元（按时点估算）；20 日平均成交额 ≥ 200 万美元。
-2. **异动入池**：单日涨幅 ≥ 12% 且量比 ≥ 3，或 5 日涨幅 ≥ 30%。
-3. **观察**：最多 90 个交易日。收盘跌回异动前的价格就作废；至少观察 10 天。这一阶段由人工研究催化剂、增发风险等。
-4. **试仓 1/3**：观察期满后，同时满足以下条件，次日开盘买入：
-   - 收盘创异动以来新高；
-   - 量比 ≥ 1.5；
-   - 收盘在 20 日线上方，且 20 日线向上。
-5. **止损**：近 10 日最低点，最多亏 15%。
-6. **加仓 2/3**：收盘浮盈达到 1R 就次日加仓；试仓 10 天内没到 1R 就出局（验证失败；v4 起由 20 天改为 10 天）。
-7. **出场**：触及止损；或加仓后收盘跌破 20 日线；或持有满 120 天。
-8. **再试**：试仓失败后，只要异动还有效，可以再等下一次新高，最多试 2 次。
-9. **数据清洗（v2）**：
-   - 有行情的交易日 ≥ 120；
-   - 异动前 20 日平均成交额 ≥ 100 万美元，零成交天数 ≤ 2；
-   - 试仓当天 20 日平均成交额 ≥ 200 万美元。
-10. **增发过滤（v2）**：异动日前 5 天到异动当天，有 424B1 / 424B4 / 424B5 / S-1 / F-1 公告就不入池。观察期内和持仓中出现增发的处理，回测更差，默认关闭。
-11. **催化剂标签（v2）**：按异动前后的 8-K item / 13D / 增发公告归类，只统计。可在 `filters.catalyst.exclude` 里排除某类，例如财报。
+1. **Universe**: actual share price at the time ≥ $1; market cap $100 million–$3 billion (point-in-time estimate); 20-day average dollar volume ≥ $2 million.
+2. **Surge enters the watchlist**: one-day gain ≥ 12% with volume ratio ≥ 3, or 5-day gain ≥ 30%.
+3. **Watch**: at most 90 trading days. A close back below the pre-surge price invalidates it; watch for at least 10 days. During this phase, catalysts, offering risk, etc. are researched manually.
+4. **Probe 1/3**: after the watch period, buy at the next day's open when all of the following hold:
+   - close at a new high since the surge;
+   - volume ratio ≥ 1.5;
+   - close above the 20-day moving average, and the 20-day moving average is rising.
+5. **Stop**: lowest low of the last 10 days, losing at most 15%.
+6. **Add 2/3**: add the next day once the unrealized gain on the close reaches 1R; if the probe does not reach 1R within 10 days, exit (validation failed; changed from 20 days to 10 days as of v4).
+7. **Exit**: stop hit; or a close below the 20-day moving average after the add; or 120 days held.
+8. **Retry**: after a failed probe, as long as the surge is still valid, wait for the next new high; at most 2 attempts.
+9. **Data cleaning (v2)**:
+   - trading days with price data ≥ 120;
+   - 20-day average dollar volume before the surge ≥ $1 million, zero-volume days ≤ 2;
+   - 20-day average dollar volume on the probe day ≥ $2 million.
+10. **Offering filter (v2)**: if there is a 424B1 / 424B4 / 424B5 / S-1 / F-1 filing from 5 days before the surge day through the surge day, the stock does not enter the watchlist. Handling offerings that appear during the watch period or while holding backtested worse and is off by default.
+11. **Catalyst tags (v2)**: classified by 8-K items / 13D / offering filings around the surge, for statistics only. A category can be excluded in `filters.catalyst.exclude`, e.g. earnings.
 
-12. **财报前不试仓（v4）**：按历史 8-K item 2.02 推算下次财报，预计财报前 14 个日历日内不试仓。
-13. **基本面检查（v4）**：试仓前用当时已披露的财报检查，缺数据不放行：
-    - 最近季度营收同比 ≥ 20%；
-    - 毛利率比去年同季度提高 ≥ 2 个百分点。
+12. **No probe before earnings (v4)**: the next earnings date is estimated from historical 8-K item 2.02; no probe within 14 calendar days before expected earnings.
+13. **Fundamentals check (v4)**: before the probe, check with earnings already disclosed at the time; missing data is blocked:
+    - latest quarter revenue YoY ≥ 20%;
+    - gross margin up ≥ 2 percentage points vs. the same quarter last year.
 
-    v3 用的是"营收同比 ≥ 50% + 现金跑道 ≥ 4 季"，见下方 v3 结论。
-13. **分批止盈**：收盘浮盈达到 3R，次日开盘卖出一半，剩下的改用 50 日线跟踪。
-14. **组合规则**：
-    - 每笔试仓风险 0.5% 账户，单支 ≤ 20%，最多同时 10 支，每天最多开 3 笔；
-    - 名额不够时，60 日相对强度低的优先；
-    - **闲置资金买入 IWM**（指数 + 策略的混合方案）。
+    v3 used "revenue YoY ≥ 50% + cash runway ≥ 4 quarters"; see the v3 conclusions below.
+13. **Partial take-profit**: when the unrealized gain on the close reaches 3R, sell half at the next day's open and trail the rest with the 50-day moving average.
+14. **Portfolio rules**:
+    - each probe risks 0.5% of the account, a single stock ≤ 20%, at most 10 at once, at most 3 new trades per day;
+    - when slots are short, lower 60-day relative strength goes first;
+    - **buy IWM with idle cash** (index + strategy hybrid).
 
-### v4 结论（详见 `reports/2026-10-10_phase5_validation_hybrid.md`）
+### v4 conclusions (details in `reports/2026-10-10_phase5_validation_hybrid.md`)
 
-- **分段验证**：只用 2019–2022 年挑选过滤条件，训练期前 10 名中有 9 个在 2023–2026 年为正，基本面过滤能推广到新数据。v4（营收 ≥ 20% + 毛利率提升）是训练期第 3 名，用引擎按规则重跑后守住了；第 1 名没守住。
-- **v4 是第一个不依赖极端值的版本**：322 笔，封顶 20R 期望 +0.25R；各种时间切分都在 +0.23R 到 +0.27R 之间；去掉前 1% 交易后仍为 +0.07R。
-- **组合**：v4 + 闲置资金买 IWM，年化 12.5%、回撤 -42%、夏普 0.53。持有 IWM 是 10.6%、-41%、0.53。收益更高，但风险调整后和指数持平。
-- **试过但没用的**：大盘过滤（IWM > 200 日线）、放宽入池门槛（单日 +8%）、距新高 5% 内试仓、按毛利率排序。
-- **试仓验证期 20 天 → 10 天（2026-10-11 采用，但效果未被证实）**：最初只测了 5 / 10 天，两者都比 20 天好，误判为"越短越好"。
-  补测 7 / 15 天后，封顶期望为 5 天 +0.26R、7 天 +0.18R、10 天 +0.32R、15 天 +0.22R、20 天 +0.25R，来回跳动，没有单调规律；
-  单笔封顶期望的标准误约 ±0.19R，这些差异都在误差范围内。结论：验证期长短不是优势来源，10 天的"改进"很可能是运气，实际预期仍按约 +0.25R 看。
-  选 10 天而不是 5 天的理由：5 天会把 21 笔后来走成赢家的试仓提前踢掉；交易更频繁，滑点 1% 时 5 天降到 +0.16R（10 天 +0.21R）；
-  一周的波动对小盘股来说太短。选 10 天而不是 20 天：两者差异是噪声，10 天资金周转更快、研究日志反馈更快。
-- **预计财报前 14 天不试仓（2026-10-11 采用）**：用历史 8-K item 2.02 发布日推算下次财报。
-  大样本里财报前 0–7 天入场两段都明显更差（-0.54R / -0.95R）。v4 引擎重跑：7 / 10 / 14 天封顶期望 +0.33 / +0.36 / +0.39R（不过滤 +0.32R），单调变好；
-  21 天回落到 +0.30R（2019–22 只有 +0.13R），说明避开太早会挡掉好票。14 天：2019–22 +0.40R、2023–26 +0.38R，去掉前 1% +0.21R，
-  总 R +127 → +143（只去掉 17 笔，基本都是亏的），组合年化 17.0% → 18.6%、夏普 0.65 → 0.70，2026 年 +18.5%。
-  14 个日历日 ≈ 10 个交易日的试仓验证期，保证验证在财报前走完。"逾期未发也避开"更差，不采用。
-- **内部人交易（Form 4）没有预测作用（2026-10-11 测试，不采用）**：解析了 2.36 万份 Form 4（异动前 10 天到试仓日），区分 10b5-1 计划内和自主卖出。
-  大样本里没有任何卖出的票反而最差（-0.10R / -0.26R），大额自主卖出（≥100 万美元）-0.18R / -0.11R，买入也无稳定区分；v4 各组两段方向来回变。
-  数据和代码保留（`src/alpha_breakout/insiders.py`、`scripts/fetch_insiders.py`），可作为人工研究的参考信息。
-- **"避开易亏票"的价格特征都没守住（2026-10-11 测试）**：异动涨幅过大、回撤过深、低价股、高波动、试仓日放天量、大盘过滤等，
-  在不加基本面过滤的大样本上能减少止损，但在 v4 上会连带砍掉大赢家；量比上限 3.0 / 3.6 / 4.5 引擎重跑都更差；
-  大盘过滤只有 IWM > 50 日线好看，20 / 100 / 200 日线都更差，判定为偶然，不采用。
-- **止损收紧也没用（2026-10-11 测试）**：最大止损 15% → 10% / 8%，封顶期望从 +0.25R 降到 -0.22R / -0.24R，组合年化从 12.3% 降到 3.8% / 6.8%；
-  近 5 日低点止损（+0.13R）、加仓后止损提到成本价（+0.13R）也都更差；放宽到 20% 与 15% 基本持平（+0.24R）。
-  原因：按风险定仓位时，止损越近，仓位越大、每次止损亏的钱基本不变（都是 1R），但被正常波动扫掉的次数大幅增加（胜率 28% → 17–18%）。
-- 新特征：毛利率同比提升有效；60 日相对强度 > 100%（涨得太远）明显更差；亏损收窄、营收规模无规律。
+- **Walk-forward validation**: filters were chosen using only 2019–2022; 9 of the top 10 in the training period were positive in 2023–2026, so fundamental filters generalize to new data. v4 (revenue ≥ 20% + gross margin improvement) was No. 3 in the training period and held up when rerun by the engine under the rules; No. 1 did not hold up.
+- **v4 is the first version that does not depend on extreme values**: 322 trades, expectancy capped at 20R +0.25R; every time split falls between +0.23R and +0.27R; still +0.07R after removing the top 1% of trades.
+- **Portfolio**: v4 + idle cash in IWM, 12.5% annualized, -42% drawdown, Sharpe 0.53. Holding IWM is 10.6%, -41%, 0.53. Higher returns, but on a risk-adjusted basis it is on par with the index.
+- **Tried but not useful**: market filter (IWM > 200-day moving average), looser watchlist entry threshold (one-day +8%), probing within 5% of the new high, ordering by gross margin.
+- **Probe validation period 20 days → 10 days (adopted 2026-10-11, but the benefit is unproven)**: initially only 5 / 10 days were tested, both better than 20 days, which was misread as "shorter is better".
+  After also testing 7 / 15 days, capped expectancy was 5 days +0.26R, 7 days +0.18R, 10 days +0.32R, 15 days +0.22R, 20 days +0.25R, jumping around with no monotonic pattern;
+  the standard error of per-trade capped expectancy is about ±0.19R, so all these differences are within error. Conclusion: the length of the validation period is not a source of edge; the 10-day "improvement" is very likely luck, and the realistic expectation remains about +0.25R.
+  Why 10 days rather than 5: 5 days would kick out early 21 probes that later became winners; trading is more frequent, and with 1% slippage 5 days drops to +0.16R (10 days +0.21R);
+  one week of price action is too short for small caps. Why 10 days rather than 20: the difference between them is noise, and 10 days turns capital over faster and gives faster research-journal feedback.
+- **No probe within 14 days before expected earnings (adopted 2026-10-11)**: the next earnings date is estimated from historical 8-K item 2.02 release dates.
+  In the large sample, entries 0–7 days before earnings were clearly worse in both periods (-0.54R / -0.95R). v4 engine rerun: 7 / 10 / 14 days capped expectancy +0.33 / +0.36 / +0.39R (no filter +0.32R), improving monotonically;
+  21 days falls back to +0.30R (only +0.13R in 2019–22), showing that avoiding too early blocks good stocks. 14 days: 2019–22 +0.40R, 2023–26 +0.38R, +0.21R after removing the top 1%,
+  total R +127 → +143 (only 17 trades removed, almost all losers), portfolio annualized 17.0% → 18.6%, Sharpe 0.65 → 0.70, +18.5% in 2026.
+  14 calendar days ≈ the 10-trading-day probe validation period, so validation finishes before earnings. "Also avoid when overdue and not yet released" was worse and is not adopted.
+- **Insider transactions (Form 4) have no predictive power (tested 2026-10-11, not adopted)**: parsed 23,600 Form 4s (from 10 days before the surge to the probe day), separating 10b5-1 plan sales from discretionary sales.
+  In the large sample, stocks with no sales at all were actually the worst (-0.10R / -0.26R), large discretionary sales (≥ $1 million) -0.18R / -0.11R, and purchases did not separate consistently either; within v4 the direction of each group flipped between the two periods.
+  The data and code are kept (`src/alpha_breakout/insiders.py`, `scripts/fetch_insiders.py`) as reference information for manual research.
+- **None of the price features for "avoiding likely losers" held up (tested 2026-10-11)**: too large a surge gain, too deep a drawdown, low-priced stocks, high volatility, extreme volume on the probe day, market filters, etc.
+  reduce stops on the large sample without the fundamentals filter, but on v4 they also cut the big winners; volume ratio caps of 3.0 / 3.6 / 4.5 were all worse in engine reruns;
+  for the market filter only IWM > 50-day moving average looked good, while 20 / 100 / 200-day were all worse, so it was judged to be chance and not adopted.
+- **Tightening the stop did not help either (tested 2026-10-11)**: max stop 15% → 10% / 8% cut capped expectancy from +0.25R to -0.22R / -0.24R and portfolio annualized return from 12.3% to 3.8% / 6.8%;
+  a stop at the 5-day low (+0.13R) and moving the stop to cost after the add (+0.13R) were also worse; widening to 20% is roughly the same as 15% (+0.24R).
+  Reason: with risk-based position sizing, the closer the stop, the larger the position, so the money lost per stop stays about the same (always 1R), but the number of times normal volatility shakes you out rises sharply (win rate 28% → 17–18%).
+- New features: YoY gross margin improvement works; 60-day relative strength > 100% (run too far) is clearly worse; narrowing losses and revenue size show no pattern.
 
-### v3 回测结论（详见 `reports/2026-10-10_phase4_research_portfolio.md`）
+### v3 backtest conclusions (details in `reports/2026-10-10_phase4_research_portfolio.md`)
 
-- **13D/13G 没有用**：按试仓前窗口分组，两段都没有稳定正向作用，"要求有 13D"比基准还差。
-- **营收同比 > 50% 是唯一两段都有效的特征**（封顶 20R 后 +0.10R / +0.12R）。现金跑道 < 4 季、没有营收的公司两段都更差。
-- **ATR 跟踪更差**。3R 分批止盈 + 50 日线略好。
-- **v3 候选**：440 笔，期望 +0.34R，封顶 +0.14R，两段都为正，2024–26 年每年为正。
-- **但还不能实盘**：
-  - 去掉最大的 4 笔后，期望变成 -0.04R；
-  - 组合模拟年化 10.3%、回撤 -47%，同期持有 IWM 是年化 10.6%、回撤 -41%，没有跑赢；
-  - 收益集中在 2020 年；
-  - 参数是看过数据后选的。
-- **下一步**：用每日扫描和研究日志做 3 个月的前瞻验证，同时继续找两段都有效的基本面特征。
+- **13D/13G is not useful**: grouped by the pre-probe window, neither period shows a consistent positive effect, and "require a 13D" is worse than the baseline.
+- **Revenue YoY > 50% is the only feature that works in both periods** (+0.10R / +0.12R after capping at 20R). Companies with cash runway < 4 quarters or no revenue are worse in both periods.
+- **ATR trailing is worse**. 3R partial take-profit + 50-day moving average is slightly better.
+- **v3 candidate**: 440 trades, expectancy +0.34R, capped +0.14R, positive in both periods, positive every year in 2024–26.
+- **But not ready for live trading yet**:
+  - after removing the 4 largest trades, expectancy becomes -0.04R;
+  - portfolio simulation 10.3% annualized, -47% drawdown, versus holding IWM over the same period at 10.6% annualized, -41% drawdown, so it did not beat it;
+  - returns are concentrated in 2020;
+  - the parameters were chosen after looking at the data.
+- **Next step**: use the daily scan and research journal for 3 months of forward validation, while continuing to look for fundamental features that work in both periods.
 
-### v2 回测结论（详见 `reports/2026-10-10_phase3_filters.md`）
+### v2 backtest conclusions (details in `reports/2026-10-10_phase3_filters.md`)
 
-- 清洗、增发过滤、催化剂排除都是合理的风控，但 **2024–26 年期望仍然约 -0.13R**，没有带来优势。
-- 两段方向一致的只有两类，而且都是负面的：异动时就在增发的、财报驱动的。
-- **根本诊断**：入场后股价中位数 60 天跑输 IWM 6–8%，60 天后跑赢的比例不到一半。纯价格信号选出来的是"彩票股"（MAX effect），正期望全靠少数大赢家（单笔封顶 20R 后所有版本都是负的）。
-- 拿得更久（50 日线跟踪）是唯一让 2024–26 年转正的改动（+0.02R），但同样依赖极端值，不稳。
-- 结论：下一步要加入价格以外的信息（内部人买入、机构入股、基本面拐点），用来区分"真趋势"和"彩票"。
+- Cleaning, the offering filter and catalyst exclusions are all sensible risk controls, but **2024–26 expectancy is still about -0.13R**, and they bring no edge.
+- Only two categories are consistent in direction across both periods, and both are negative: those with an offering at the time of the surge, and those driven by earnings.
+- **Root diagnosis**: after entry, the median stock underperforms IWM by 6–8% over 60 days, and fewer than half outperform after 60 days. Pure price signals pick "lottery stocks" (MAX effect), and the positive expectancy relies entirely on a few big winners (every version is negative after capping each trade at 20R).
+- Holding longer (50-day moving average trailing) is the only change that turned 2024–26 positive (+0.02R), but it also depends on extreme values and is not stable.
+- Conclusion: the next step is to add information beyond price (insider buying, institutional stakes, fundamental inflections) to tell "real trends" from "lottery tickets".
 
-### v1 回测结论（详见 `reports/2026-10-10_phase2_v1_backtest.md`）
+### v1 backtest conclusions (details in `reports/2026-10-10_phase2_v1_backtest.md`)
 
-- 和"异动次日直接追"比，分批建仓好得多：v1 期望 +0.05R，直接追是 -0.09R。
-- v1 自身还没有稳定的优势：收益集中在 2020 年和少数极端赢家，2024–26 年期望 -0.07R。11 个参数变体在 2024–26 年全部为负，所以不能实盘。
-- 第二波能抓到（SDGR 2023），但从全市场看，第二波入场的期望最低（-0.13R）；异动后 10–20 天就创新高的持续型最好（+0.20R）。
-- 缺的是"研究"环节的过滤器：增发、催化剂类型、流通盘 / 可交易性、板块联动。
+- Compared with "chasing the day after the surge", staged entry is much better: v1 expectancy +0.05R, direct chasing -0.09R.
+- v1 itself does not yet have a stable edge: returns are concentrated in 2020 and a few extreme winners, with 2024–26 expectancy -0.07R. All 11 parameter variants are negative in 2024–26, so it cannot be traded live.
+- The second wave can be caught (SDGR 2023), but across the full market, second-wave entries have the lowest expectancy (-0.13R); the sustained type that makes a new high 10–20 days after the surge is the best (+0.20R).
+- What's missing are filters for the "research" step: offerings, catalyst type, float / tradability, sector co-movement.
 
-## 4. 历史版本
+## 4. Version history
 
-- **v0 平台突破扫描器**（`configs/scanner_v0.yaml`、`src/alpha_breakout/scanner.py`）：要求横盘 60–120 天、波动率低位、3 倍量突破。PRME、SDGR 全部历史上 0 次触发，详见 `reports/2026-10-10_phase1_event_study.md`。已被 v1 替换，代码保留作参考。
+- **v0 base-breakout scanner** (`configs/scanner_v0.yaml`, `src/alpha_breakout/scanner.py`): requires 60–120 days of consolidation, low volatility and a breakout on 3x volume. PRME and SDGR triggered 0 times across their entire history; see `reports/2026-10-10_phase1_event_study.md`. Replaced by v1; code kept for reference.
 
-## 5. 研究方法
+## 5. Research method
 
-1. 全市场事件回测：每次异动都走一遍状态机，统计全部结果，不挑样本。
-   评价时同时看"单笔封顶 20R 后的期望"，避免被少数极端值误导。
-2. 对照组：同一批异动直接追（immediate 模式），检验观察和试仓是否真有用。
-3. 防过拟合：每次只改一个参数；分 2019–2023 / 2024–2026 两段看，两段方向一致才算数。
-4. 指标：胜率、平均盈亏 R、期望值、最大连续亏损、最大回撤（R）、收益对极端值的依赖程度。
+1. Full-market event backtest: every surge runs through the state machine, and all results are counted, with no cherry-picking of samples.
+   Evaluation also looks at "expectancy with each trade capped at 20R" to avoid being misled by a few extreme values.
+2. Control group: chase the same set of surges directly (immediate mode) to test whether watching and probing actually help.
+3. Guarding against overfitting: change only one parameter at a time; look at 2019–2023 / 2024–2026 separately, and it only counts if both periods point the same way.
+4. Metrics: win rate, average win/loss in R, expectancy, max consecutive losses, max drawdown (R), and how much returns depend on extreme values.
 
-## 6. 数据源
+## 6. Data sources
 
-| 用途 | 来源 | 域名 |
+| Purpose | Source | Domain |
 | --- | --- | --- |
-| 日线行情 | Yahoo Finance（yfinance） | `query1.finance.yahoo.com`（已放行） |
-| 股票列表、股本 | SEC `company_tickers_exchange.json`、XBRL frames API | `www.sec.gov`, `data.sec.gov`（已放行） |
-| 公告（8-K、S-3、424B5、13D） | SEC EDGAR submissions API | 同上 |
-| ~~备用行情~~ | ~~Stooq~~（云端环境不通，不用） | — |
+| Daily prices | Yahoo Finance (yfinance) | `query1.finance.yahoo.com` (allowed) |
+| Stock list, share count | SEC `company_tickers_exchange.json`, XBRL frames API | `www.sec.gov`, `data.sec.gov` (allowed) |
+| Filings (8-K, S-3, 424B5, 13D) | SEC EDGAR submissions API | Same as above |
+| ~~Backup prices~~ | ~~Stooq~~ (unreachable from the cloud environment, not used) | — |
 
-> SEC 要求 User-Agent 带联系方式，用环境变量 `SEC_USER_AGENT` 设置。
+> SEC requires a User-Agent with contact info, set via the `SEC_USER_AGENT` environment variable.
 
-## 7. 待办
+## 7. To-do
 
-- [x] 放开网络访问（Yahoo Finance、SEC EDGAR）
-- [x] 数据拉取模块：yfinance 加本地缓存，支持全市场批量下载
-- [x] 全市场股票池：4956 支，按时点估算市值
-- [x] v0 平台突破扫描器 + PRME / SDGR 事件复盘（第一阶段，已被 v1 替换）
-- [x] v1「异动 → 观察 → 试仓 → 加仓」全市场回测 + 对照组 + 11 个参数变体（第二阶段）
-- [x] 全市场 SEC 公告索引（`scripts/fetch_filings.py`，311 万条）
-- [x] 增发过滤（异动时开启；观察期 / 持仓中的过滤回测更差，默认关）
-- [x] 数据清洗（MGRT 类不可交易的票已排除；NXH 核实为 Overstock 真实行情）
-- [x] 催化剂分类（第三阶段报告第 4 节）
-- [x] 13D / 13G 机构入股（两段都无效，不采用）
-- [x] 基本面拐点：营收同比 ≥ 50% + 现金跑道 ≥ 4 季（采用，v3 候选）
-- [x] 出场再研究：ATR 更差；3R 分批止盈 + 50 日线略好（采用）；评价指标已加"封顶 20R 后的期望"
-- [x] 组合层面模拟（`scripts/portfolio.py`）
-- [x] 每日扫描 + 研究日志（`scripts/daily_scan.py`、`journal/`、`scripts/evaluate_journal.py`）
-- [x] 每日自动扫描：定时任务每个交易日美东 17:47 运行 `daily_scan.py`，报告和研究日志提交到 main（2026-10-11 起）
-- [ ] **前瞻验证**：每天看 `reports/daily/<日期>.md`、在 `journal/research_log.csv` 填"做 / 不做"，3–6 个月后用 `evaluate_journal.py` 评估（样本外表现、人工判断的增益）
-- [x] 更多基本面特征：毛利率改善（有效，进入 v4）；营收规模、亏损收窄（无效）
-- [x] 信号排序（v4 信号少，影响很小；默认按相对强度从低到高）
-- [x] 和 IWM 的混合方案（闲置资金买 IWM，v4 默认）
-- [x] 分段验证（`scripts/walk_forward.py`）
-- [ ] 基本面打分代替硬门槛（按分数排序和定仓位）
-- [ ] 扩大信息面：内部人买入、分析师覆盖变化、板块联动
-- [x] 内部人买卖：解析 Form 4（P / S，区分 10b5-1），无预测作用，不采用
-- [x] 财报前不试仓（14 天，采用）
-- [ ] 板块联动：同 SIC 行业同期多支异动
-- [ ] 补充用户样本
+- [x] Open network access (Yahoo Finance, SEC EDGAR)
+- [x] Data fetch module: yfinance with a local cache, supports full-market bulk download
+- [x] Full-market stock universe: 4956 stocks, point-in-time market cap estimate
+- [x] v0 base-breakout scanner + PRME / SDGR event review (phase 1, replaced by v1)
+- [x] v1 "surge → watch → probe → add" full-market backtest + control group + 11 parameter variants (phase 2)
+- [x] Full-market SEC filing index (`scripts/fetch_filings.py`, 3.11 million entries)
+- [x] Offering filter (on at the surge; filtering during the watch period / while holding backtested worse, off by default)
+- [x] Data cleaning (untradable stocks like MGRT excluded; NXH verified as genuine Overstock prices)
+- [x] Catalyst classification (phase 3 report, section 4)
+- [x] 13D / 13G institutional stakes (ineffective in both periods, not adopted)
+- [x] Fundamental inflection: revenue YoY ≥ 50% + cash runway ≥ 4 quarters (adopted, v3 candidate)
+- [x] Exit re-research: ATR worse; 3R partial take-profit + 50-day moving average slightly better (adopted); "expectancy capped at 20R" added to the evaluation metrics
+- [x] Portfolio-level simulation (`scripts/portfolio.py`)
+- [x] Daily scan + research journal (`scripts/daily_scan.py`, `journal/`, `scripts/evaluate_journal.py`)
+- [x] Automated daily scan: a scheduled task runs `daily_scan.py` every trading day at 17:47 US Eastern and commits the report and research journal to main (since 2026-10-11)
+- [ ] **Forward validation**: check `reports/daily/<date>.md` every day, fill in "do / skip" in `journal/research_log.csv`, and evaluate with `evaluate_journal.py` after 3–6 months (out-of-sample performance, value added by human judgment)
+- [x] More fundamental features: gross margin improvement (works, included in v4); revenue size, narrowing losses (ineffective)
+- [x] Signal ordering (v4 has few signals, minimal impact; default is relative strength from low to high)
+- [x] Hybrid with IWM (idle cash in IWM, v4 default)
+- [x] Walk-forward validation (`scripts/walk_forward.py`)
+- [ ] Fundamental scoring instead of hard thresholds (rank and size positions by score)
+- [ ] Broaden information: insider buying, changes in analyst coverage, sector co-movement
+- [x] Insider buying/selling: parse Form 4 (P / S, separating 10b5-1), no predictive power, not adopted
+- [x] No probe before earnings (14 days, adopted)
+- [ ] Sector co-movement: multiple surges in the same SIC industry at the same time
+- [ ] Add user samples
