@@ -1,24 +1,25 @@
-"""每日扫描：收盘后跑一次，输出当天的观察名单和研究日志模板。
+"""Daily scan: run once after the close; writes the day's watchlist and research journal template.
 
-用法：
+Usage:
     python scripts/daily_scan.py [--config configs/strategy_v4.yaml] [--no-update] [--equity 100000]
-    python scripts/daily_scan.py --bootstrap     # 全新环境（云端定时任务）：只下载扫描需要的数据，约 20–25 分钟
+    python scripts/daily_scan.py --bootstrap     # fresh environment (cloud scheduled run): download only what the scan needs, about 20-25 minutes
 
-步骤：
-1. 准备数据：
-   - 平时：增量更新全市场行情（约 10 分钟；--no-update 跳过，直接用缓存）
-   - --bootstrap：建股票池、下载最近约 14 个月的行情、最近 3 年的季度基本面（不需要事先跑 build_universe 等脚本）
-2. 对每支票跑一遍策略状态机到最新交易日，得到当前状态
-3. 对观察名单里的公司刷新 SEC 公告（拿到最新的 8-K item、增发、13D/13G），再跑一遍
-4. 输出 reports/daily/<日期>.md，并把最近 5 个交易日内的试仓信号追加到 journal/research_log.csv
-   （同一支票同一信号日只记一次；决定一栏留空，由你填写）
+Steps:
+1. Prepare data:
+   - normally: incremental price update for the whole market (about 10 minutes; --no-update skips it and uses the cache)
+   - --bootstrap: build the universe, download about 14 months of prices and 3 years of quarterly fundamentals
+     (no need to run build_universe and the other scripts first)
+2. Run the strategy state machine for every ticker up to the latest trading day to get its current state
+3. Refresh SEC filings for the companies on the watchlist (latest 8-K items, offerings, 13D/13G) and run again
+4. Write reports/daily/<date>.md and append probe signals from the last 5 trading days to journal/research_log.csv
+   (each ticker + signal date is recorded once; the decision column is left blank for you to fill in)
 
-名单分五类：
-- 可试仓：今天收盘满足试仓条件，按规则明天开盘买入 1/3
-- 最近 5 个交易日的信号：哪天漏跑也能补上，并显示规则下的后续状态
-- 持仓管理：规则下的假想持仓，今天收盘触发了加仓 / 分批止盈 / 出场
-- 新入池：今天刚出现异动
-- 观察中：异动后还在观察期内，没跌回异动前价格
+The report has five sections:
+- Probe candidates: met the probe condition at today's close; by the rules, buy 1/3 at tomorrow's open
+- Probe signals in the last 5 trading days: catches up on missed days and shows what happened under the rules
+- Position management: hypothetical positions under the rules whose close today triggered an add / partial / exit
+- New on watchlist: surged today
+- Watching: within the watch period after a surge and not back below the pre-surge price
 """
 from __future__ import annotations
 
@@ -98,14 +99,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(ROOT / "configs" / "strategy_v4.yaml"))
     ap.add_argument("--no-update", action="store_true")
-    ap.add_argument("--equity", type=float, help="账户规模，用于计算建议股数；默认取配置 portfolio.initial_equity")
+    ap.add_argument("--equity", type=float, help="account size for the suggested share count; defaults to portfolio.initial_equity in the config")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--bootstrap", action="store_true", help="全新环境：只下载扫描需要的数据")
+    ap.add_argument("--bootstrap", action="store_true", help="fresh environment: download only the data the scan needs")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     cfg["backtest"]["end"] = None
-    sh_start = pd.Timestamp.today().year - 2   # 市值只需要最近的股本
+    sh_start = pd.Timestamp.today().year - 2   # market cap only needs recent share counts
     if args.bootstrap:
         bootstrap(sh_start)
     u = pd.read_csv(UNIVERSE)
@@ -113,7 +114,7 @@ def main():
         update_recent(list(u["ticker"]) + list(BENCHMARKS))
     iwm = adjust(load_raw("IWM"))
     last_day = iwm.index[-1]
-    # 只需要最近的状态：从 200 天前开始跑状态机（观察期最多 90 天）；指标用到的更早数据照常参与计算
+    # only the current state is needed: run the state machine from 200 days back (watch period is at most 90 days); older data still feeds the indicators
     cfg["backtest"]["start"] = str((last_day - pd.Timedelta(days=200)).date())
     cfg["_recent_cutoff"] = iwm.index[-RECENT_DAYS]
 
@@ -127,8 +128,8 @@ def main():
             return [r for r in ex.map(_state, rows_, chunksize=25) if r is not None]
 
     recs = scan(rows, fil)
-    # 观察名单里的公司刷新公告后再跑一遍，拿到最新的增发 / 8-K / 13D
-    # （没有公告缓存时第一遍不做增发过滤，候选只多不少，第二遍再按公告修正）
+    # refresh filings for the watchlist companies and run again to pick up the latest offerings / 8-Ks / 13Ds
+    # (without a filings cache the first pass skips the offering filter, so it only over-includes; the second pass corrects it)
     live = [r for r in recs if r["date"] == last_day]
     if live:
         ciks = sorted({r["cik"] for r in live})
@@ -148,7 +149,7 @@ def _filings_dict(f: pd.DataFrame | None) -> dict:
 
 
 def bootstrap(sh_start: int):
-    """全新环境下准备扫描所需的最少数据（已有缓存的部分会跳过）。"""
+    """Prepare the minimum data the scan needs in a fresh environment (cached parts are skipped)."""
     u = listed_common_stocks()
     sh = shares_history(start_year=sh_start)
     u = u[u["cik"].isin(set(sh["cik"]))]
@@ -167,31 +168,35 @@ def _fmt_pct(x):
 
 
 def _fmt_pt(x):
-    return "—" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 100:+.1f} 点"
+    return "—" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 100:+.1f} pt"
 
 
 def _fmt_dte(x):
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "—"
-    return f"约 {x:.0f} 天" if x >= 0 else f"逾期 {-x:.0f} 天"
+    return f"~{x:.0f} d" if x >= 0 else f"overdue {-x:.0f} d"
 
 
 def _fmt_runway(x):
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return "—"
-    return "盈利" if np.isinf(x) else f"{x:.1f} 季"
+    return "profitable" if np.isinf(x) else f"{x:.1f} q"
 
 
-def _fund_rule(cfg) -> str:
+def _fund_parts(cfg) -> str:
     fu = (cfg.get("filters") or {}).get("fundamentals") or {}
     parts = []
     if fu.get("min_rev_yoy") is not None:
-        parts.append(f"营收同比 ≥ {fu['min_rev_yoy']:.0%}")
+        parts.append(f"revenue YoY >= {fu['min_rev_yoy']:.0%}")
     if fu.get("min_gm_change") is not None:
-        parts.append(f"毛利率同比提升 ≥ {fu['min_gm_change'] * 100:.0f} 个点")
+        parts.append(f"gross margin up >= {fu['min_gm_change'] * 100:.0f} pt YoY")
     if fu.get("min_runway_q") is not None:
-        parts.append(f"现金跑道 ≥ {fu['min_runway_q']} 季")
-    return "基本面要求：" + ("、".join(parts) if parts else "无")
+        parts.append(f"cash runway >= {fu['min_runway_q']} quarters")
+    return ", ".join(parts) if parts else "none"
+
+
+def _fund_rule(cfg) -> str:
+    return "fundamentals: " + _fund_parts(cfg)
 
 
 def _fund_ok(r, cfg) -> str:
@@ -211,7 +216,7 @@ def _fund_ok(r, cfg) -> str:
     if any(c is False for c in checks):
         return "✗"
     if any(c is None for c in checks):
-        return "缺数据" if not fu.get("allow_missing", True) else "✓"
+        return "missing" if not fu.get("allow_missing", True) else "✓"
     return "✓"
 
 
@@ -231,21 +236,21 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     p = cfg["position"]
     pcfg = cfg.get("portfolio") or {}
     risk_amt = equity * pcfg.get("risk_per_trade", 0.005)
-    lines = [f"# 每日扫描 {day.date()}", "",
-             f"- 规则：{cfg['surge']['one_day']['min_ret']:.0%} 单日放量或 {cfg['surge']['multi_day']['min_ret']:.0%} 五日涨幅入池；"
-             f"观察 {cfg['watch']['min_days']}–{cfg['watch']['max_days']} 天；创异动以来新高试仓 1/3；{_fund_rule(cfg)}；"
-             f"预计财报前 {((cfg.get('filters') or {}).get('earnings') or {}).get('avoid_before_days')} 天内不试仓",
-             f"- 账户 {equity:,.0f} 美元，每笔试仓风险 {risk_amt:,.0f} 美元（1R）",
-             "- 价格为复权收盘价。规则只负责找票和管风险，做不做由你研究后决定，并记在 journal/research_log.csv。", ""]
+    lines = [f"# Daily scan {day.date()}", "",
+             f"- Rules: enter the watchlist on a {cfg['surge']['one_day']['min_ret']:.0%} one-day surge on volume or a {cfg['surge']['multi_day']['min_ret']:.0%} five-day gain; "
+             f"watch {cfg['watch']['min_days']}-{cfg['watch']['max_days']} days; probe 1/3 on a new high since the surge; {_fund_rule(cfg)}; "
+             f"no probe within {((cfg.get('filters') or {}).get('earnings') or {}).get('avoid_before_days')} days before expected earnings",
+             f"- Account ${equity:,.0f}, probe risk per trade ${risk_amt:,.0f} (1R)",
+             "- Prices are adjusted closes. The rules only find names and manage risk; whether to trade is your call after research, recorded in journal/research_log.csv.", ""]
 
     if df.empty:
-        lines.append("今天没有符合条件的票。")
+        lines.append("No names met the conditions today.")
     sig = df[(df["state"] == "pending_entry")] if not df.empty else df
-    lines += ["## 可试仓（明天开盘按规则买入 1/3）", ""]
+    lines += ["## Probe candidates (buy 1/3 at tomorrow's open per the rules)", ""]
     if sig.empty:
-        lines += ["无", ""]
+        lines += ["None", ""]
     else:
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 异动涨幅 | 规则止损 | 止损幅度 | 建议试仓股数 | 营收同比 | 毛利率变化 | 距下次财报 | 现金跑道 | 催化剂 | 13D新/改/13G | 近期公告 |",
+        lines += ["| Ticker | Close | Surge date | Day | Surge gain | Rule stop | Stop % | Probe shares | Rev YoY | GM change | Next earnings | Cash runway | Catalyst | 13D new/amend/13G | Recent filings |",
                   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for r in sig.sort_values("ticker").itertuples():
             stop = max(r.low10, r.close * (1 - p["max_stop_pct"]))
@@ -257,27 +262,27 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
                 f"{r.catalyst} | {int(r.new_13d)}/{int(r.amend_13d)}/{int(r.new_13g)} | "
                 f"{_recent_filings(fil, r.cik, pd.Timestamp(r.surge_date) - pd.Timedelta(days=10))} |")
         lines.append("")
-        lines.append("止损按今天收盘估算（近 10 日最低点，最多 -15%）；实际以明天开盘价重新计算。")
+        lines.append("Stop estimated from today's close (10-day low, at most -15%); recalculated from tomorrow's open.")
         lines.append("")
 
     rec_rows = [dict(ticker=r.ticker, cik=r.cik, **x) for r in df.itertuples() for x in (r.recent or [])] \
         if not df.empty and "recent" in df else []
     rec_df = pd.DataFrame(rec_rows)
-    lines += [f"## 最近 {RECENT_DAYS} 个交易日的试仓信号（{len(rec_df)}）", ""]
+    lines += [f"## Probe signals in the last {RECENT_DAYS} trading days ({len(rec_df)})", ""]
     if rec_df.empty:
-        lines += ["无", ""]
+        lines += ["None", ""]
     else:
-        lines += ["| 代码 | 信号日 | 异动日 | 信号日收盘 | 入场日 | 入场价 | 初始止损 | 规则下的状态 | 营收同比 | 毛利率变化 |",
+        lines += ["| Ticker | Signal date | Surge date | Signal close | Entry date | Entry | Initial stop | Status under rules | Rev YoY | GM change |",
                   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for r in rec_df.sort_values(["signal_date", "ticker"], ascending=[False, True]).itertuples():
             if pd.isna(r.entry_date):
-                status = "明天开盘试仓"
+                status = "probe at tomorrow's open"
             elif pd.notna(r.exit_date) and r.exit_reason != "open":
-                status = f"已出局 {pd.Timestamp(r.exit_date).date()} @ {r.exit_price:.2f}（{r.exit_reason}）"
+                status = f"exited {pd.Timestamp(r.exit_date).date()} @ {r.exit_price:.2f} ({r.exit_reason})"
             elif pd.notna(r.add_date):
-                status = "已加仓，持有中"
+                status = "added, holding"
             else:
-                status = "试仓中"
+                status = "probing"
             entry_d = "—" if pd.isna(r.entry_date) else str(pd.Timestamp(r.entry_date).date())
             entry_p = "—" if pd.isna(r.entry) else f"{r.entry:.2f}"
             stop_p = "—" if pd.isna(r.stop0) else f"{r.stop0:.2f}"
@@ -288,41 +293,41 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
         _append_journal(rec_df, day, p)
 
     pos = df[df["state"].isin(["probe", "full"])] if not df.empty else df
-    lines += ["## 持仓管理（规则下的假想持仓）", ""]
+    lines += ["## Position management (hypothetical positions under the rules)", ""]
     if pos.empty:
-        lines += ["无", ""]
+        lines += ["None", ""]
     else:
-        lines += ["| 代码 | 状态 | 入场日 | 入场价 | 收盘 | 止损 | 明天动作 |", "| --- | --- | --- | --- | --- | --- | --- |"]
-        act_name = {"add": "加仓到满仓", "partial": "分批止盈", "exit": "清仓", None: "持有"}
+        lines += ["| Ticker | State | Entry date | Entry | Close | Stop | Tomorrow |", "| --- | --- | --- | --- | --- | --- | --- |"]
+        act_name = {"add": "add to full", "partial": "partial take-profit", "exit": "exit", None: "hold"}
         for r in pos.sort_values("ticker").itertuples():
-            pend = None if pd.isna(r.pending) else r.pending  # DataFrame 里 None 会变成 NaN
+            pend = None if pd.isna(r.pending) else r.pending  # None becomes NaN in the DataFrame
             reason = "" if pd.isna(r.pending_reason) else r.pending_reason
-            act = act_name.get(pend, pend) + (f"（{reason}）" if reason else "")
-            lines.append(f"| {r.ticker} | {'试仓' if r.state == 'probe' else '满仓'} | {pd.Timestamp(r.entry_date).date()} | "
+            act = act_name.get(pend, pend) + (f" ({reason})" if reason else "")
+            lines.append(f"| {r.ticker} | {'probe' if r.state == 'probe' else 'full'} | {pd.Timestamp(r.entry_date).date()} | "
                          f"{r.entry:.2f} | {r.close:.2f} | {r.stop:.2f} | {act} |")
         lines.append("")
 
     new = df[(df["state"] == "watch") & (df["days_since_surge"] == 0)] if not df.empty else df
-    lines += [f"## 新入池（{len(new)}）", ""]
+    lines += [f"## New on watchlist ({len(new)})", ""]
     if new.empty:
-        lines += ["无", ""]
+        lines += ["None", ""]
     else:
-        lines += ["| 代码 | 收盘 | 异动类型 | 涨幅 | 量比 | 市值(亿美元) | 催化剂 | 近期公告 |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| Ticker | Close | Surge type | Gain | Vol ratio | Mkt cap ($M) | Catalyst | Recent filings |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
         for r in new.sort_values("surge_gain", ascending=False).itertuples():
             lines.append(f"| {r.ticker} | {r.close:.2f} | {r.surge_kind} | {r.surge_gain:+.0%} | {r.vol_ratio:.1f} | "
-                         f"{r.mcap / 1e8:.1f} | {r.catalyst} | {_recent_filings(fil, r.cik, day - pd.Timedelta(days=10), 4)} |")
+                         f"{r.mcap / 1e6:,.0f} | {r.catalyst} | {_recent_filings(fil, r.cik, day - pd.Timedelta(days=10), 4)} |")
         lines.append("")
 
     watch = df[(df["state"] == "watch") & (df["days_since_surge"] > 0)] if not df.empty else df
-    lines += [f"## 观察中（{len(watch)}）", "", "按距异动以来最高收盘的距离排序，越接近 0% 越接近试仓条件。", ""]
+    lines += [f"## Watching ({len(watch)})", "", "Sorted by distance from the highest close since the surge; the closer to 0%, the closer to a probe signal.", ""]
     if not watch.empty:
         watch = watch.assign(dist=watch["close"] / watch["surge_high"] - 1).sort_values("dist", ascending=False)
         n_ok = sum(_fund_ok(r, cfg) == "✓" for r in watch.itertuples())
-        lines.insert(len(lines) - 1, f"基本面达标（{_fund_rule(cfg)[6:]}）的有 {n_ok} 支，只有这些创新高时才会出现在“可试仓”里。")
-        lines += ["| 代码 | 收盘 | 异动日 | 第几天 | 距最高 | 距作废线 | 基本面 | 营收同比 | 毛利率变化 | 距下次财报 | 现金跑道 | 催化剂 | 13D新/改/13G |",
+        lines.insert(len(lines) - 1, f"{n_ok} names pass fundamentals ({_fund_parts(cfg)}); only these appear under Probe candidates when they make a new high.")
+        lines += ["| Ticker | Close | Surge date | Day | From high | Above invalidation | Fundamentals | Rev YoY | GM change | Next earnings | Cash runway | Catalyst | 13D new/amend/13G |",
                   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         watch = watch.assign(fund_ok=[_fund_ok(r, cfg) for r in watch.itertuples()])
-        watch = watch.sort_values(["fund_ok", "dist"], ascending=[False, False], key=lambda c: c.map({"✓": 2, "缺数据": 1, "✗": 0}) if c.name == "fund_ok" else c)
+        watch = watch.sort_values(["fund_ok", "dist"], ascending=[False, False], key=lambda c: c.map({"✓": 2, "missing": 1, "✗": 0}) if c.name == "fund_ok" else c)
         for r in watch.itertuples():
             lines.append(f"| {r.ticker} | {r.close:.2f} | {pd.Timestamp(r.surge_date).date()} | {r.days_since_surge} | "
                          f"{r.dist:+.0%} | {r.close / r.pre_surge_close - 1:+.0%} | {r.fund_ok} | {_fmt_pct(r.rev_yoy)} | "
@@ -331,12 +336,12 @@ def write_report(df: pd.DataFrame, cfg: dict, day: pd.Timestamp, fil: dict, equi
     path = out_dir / f"{day.date()}.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     df.drop(columns=["recent"], errors="ignore").to_csv(out_dir / f"{day.date()}.csv", index=False)
-    print(f"saved {path}  (可试仓 {len(sig)}, 近 {RECENT_DAYS} 日信号 {len(rec_df)}, 持仓 {len(pos)}, "
-          f"新入池 {len(new)}, 观察中 {len(watch)})")
+    print(f"saved {path}  (probe candidates {len(sig)}, signals in last {RECENT_DAYS} days {len(rec_df)}, positions {len(pos)}, "
+          f"new on watchlist {len(new)}, watching {len(watch)})")
 
 
 def _append_journal(rec_df: pd.DataFrame, day: pd.Timestamp, p: dict):
-    """最近的试仓信号追加进研究日志；同一支票同一信号日只记一次。"""
+    """Append recent probe signals to the research journal; each ticker + signal date is recorded once."""
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     old = pd.read_csv(JOURNAL) if JOURNAL.exists() else pd.DataFrame(columns=JOURNAL_COLS)
     seen = set(zip(old["ticker"].astype(str), old["signal_date"].astype(str)))

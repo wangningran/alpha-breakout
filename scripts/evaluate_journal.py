@@ -1,12 +1,13 @@
-"""评估研究日志：比较你标记“做”和“不做”的票，之后的实际表现。
+"""Evaluate the research journal: compare how the names you marked "do" and "skip" performed afterwards.
 
-用法：python scripts/evaluate_journal.py [--journal journal/research_log.csv]
+Usage: python scripts/evaluate_journal.py [--journal journal/research_log.csv]
 
-对每条记录，从信号日次日开盘价算 5 / 20 / 60 个交易日后的收益，以及期间最大涨幅、最大回撤。
-分三组汇总：
-- 规则全部信号：日志里的每一条，不管你填没填 decision（= 规则自己的前瞻表现）
-- 做 / 不做：你填了 decision 的记录（= 人工判断有没有增益）
-数据不够的天数显示为空。先跑一次 daily_scan.py --no-update 更新行情再评估。
+For each entry, compute the return 5 / 20 / 60 trading days after the open of the day after the signal,
+plus the maximum gain and maximum drawdown over that window.
+Three groups are summarized:
+- all rule signals: every journal entry, whether or not you filled in decision (= the rule's own forward performance)
+- do / skip: entries where you filled in decision (= whether human judgment adds value)
+Horizons without enough data are left blank. Run daily_scan.py --no-update first to refresh prices.
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ def outcome(ticker: str, signal_date) -> dict:
     if raw is None:
         return {}
     px = adjust(raw)
-    i = px.index.searchsorted(pd.Timestamp(signal_date), side="right")  # 信号日的下一个交易日
+    i = px.index.searchsorted(pd.Timestamp(signal_date), side="right")  # the trading day after the signal
     if i >= len(px):
         return {}
     entry = px["Open"].iloc[i]
@@ -46,29 +47,29 @@ def main():
     ap.add_argument("--journal", default=str(ROOT / "journal" / "research_log.csv"))
     a = ap.parse_args()
     if not Path(a.journal).exists():
-        print("还没有研究日志：先跑 scripts/daily_scan.py，出现“可试仓”的票后会自动生成。")
+        print("No research journal yet: run scripts/daily_scan.py; it is created once a probe candidate appears.")
         return
     j = pd.read_csv(a.journal)
     if j.empty:
-        print("日志是空的。")
+        print("The journal is empty.")
         return
     res = pd.DataFrame([outcome(r.ticker, r.signal_date) for r in j.itertuples()], index=j.index)
     j = j.join(res)
-    dec = j["decision"].fillna("").astype(str).str.strip()
-    j["group"] = np.where(dec == "", "未填", np.where(dec == "做", "做", "不做"))
+    dec = j["decision"].fillna("").astype(str).str.strip().str.lower()
+    j["group"] = np.where(dec == "", "blank", np.where(dec == "do", "do", "skip"))
     cols = ["ret_5d", "ret_20d", "ret_60d", "max_gain_60d", "max_dd_60d"]
     pd.set_option("display.width", 200)
-    print("== 规则全部信号")
+    print("== All rule signals")
     print(j[cols].agg(["count", "mean", "median"]).round(3).to_string())
-    filled = j[j["group"] != "未填"]
+    filled = j[j["group"] != "blank"]
     if filled.empty:
-        print("\n还没有填写 decision 的记录，无法比较人工判断。")
+        print("\nNo entries with a decision yet; cannot compare human judgment.")
     else:
-        print("\n== 按你的判断分组")
+        print("\n== Grouped by your decision")
         print(filled.groupby("group")[cols].agg(["count", "mean", "median"]).round(3).to_string())
     out = ROOT / "journal" / "evaluation.csv"
     j.to_csv(out, index=False)
-    print(f"明细：{out}")
+    print(f"Details: {out}")
 
 
 if __name__ == "__main__":

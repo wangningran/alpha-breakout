@@ -437,7 +437,7 @@
     }
   },
   "staged_by_timing": {
-    "10-20d 持续型": {
+    "10-20d sustained": {
       "trades": 94,
       "closed": 94,
       "open": 0,
@@ -481,7 +481,7 @@
       "max_losing_streak": 9,
       "avg_hold_days": 20.9
     },
-    "46-90d 二波": {
+    "46-90d second wave": {
       "trades": 139,
       "closed": 139,
       "open": 0,

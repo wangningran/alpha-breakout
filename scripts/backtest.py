@@ -1,13 +1,13 @@
-"""全市场回测：异动 → 观察 → 试仓 → 加仓，并和“异动次日直接满仓”对照。
+"""Full-market backtest: surge -> watch -> probe -> add, compared against "full position the day after the surge".
 
-用法：
+Usage:
     python scripts/backtest.py [--config configs/strategy_v3.yaml] [--tag v3]
         [--set position.exit_mode=atr ...] [--tickers SDGR,PRME] [--features]
 
-前置：scripts/build_universe.py（行情）、scripts/fetch_filings.py（公告）、
-      scripts/fetch_fundamentals.py（基本面，用到 fundamentals 过滤或 --features 时需要）。
-输出到 reports/data/：trades_<tag>_staged.csv、trades_<tag>_immediate.csv、summary_<tag>.json
---features：给每笔分批交易加上试仓日的 13D/13G 和基本面特征列（用于分组研究）。
+Prerequisites: scripts/build_universe.py (prices), scripts/fetch_filings.py (filings),
+      scripts/fetch_fundamentals.py (fundamentals; needed for the fundamentals filter or --features).
+Writes to reports/data/: trades_<tag>_staged.csv, trades_<tag>_immediate.csv, summary_<tag>.json
+--features: add probe-day 13D/13G and fundamental feature columns to each staged trade (for group studies).
 """
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def _work(row):
 
 
 def rel_strength(close: pd.Series, bench: pd.Series, date) -> dict:
-    """试仓信号日的相对强度：个股 N 日涨幅 − IWM 同期涨幅。"""
+    """Relative strength on the probe signal day: the stock's N-day return minus IWM's over the same period."""
     out = {}
     i = close.index.get_loc(pd.Timestamp(date))
     b = bench.reindex(close.index).ffill()
@@ -100,7 +100,7 @@ def summarize(df: pd.DataFrame) -> dict:
     r = closed["r_multiple"]
     pnl = closed["pnl"]
     wins = pnl > 0
-    # R 曲线按出场日排序：每笔交易承担相同风险（1R）的累计收益
+    # R curve sorted by exit date: cumulative return with every trade risking the same 1R
     curve = closed.sort_values("exit_date")["r_multiple"].cumsum()
     dd = (curve - curve.cummax()).min() if len(curve) else 0
     streak = max_streak(closed.sort_values("exit_date")["pnl"] <= 0)
@@ -144,7 +144,7 @@ def main():
     ap.add_argument("--set", nargs="*")
     ap.add_argument("--tickers")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--catalyst", action="store_true", help="没开增发过滤时也加载公告，给交易打催化剂标签")
+    ap.add_argument("--catalyst", action="store_true", help="load filings even without the offering filter, to tag trades with a catalyst")
     ap.add_argument("--universe", default=str(ROOT / "data" / "cache" / "universe.csv"))
     ap.add_argument("--features", action="store_true")
     args = ap.parse_args()
@@ -163,7 +163,7 @@ def main():
     if (flt.get("offering") or {}).get("enabled") or args.catalyst or args.features or need_holders or need_earn:
         f = filings.load()
         if f is None:
-            sys.exit("缺少 data/cache/filings.parquet，先跑 scripts/fetch_filings.py")
+            sys.exit("missing data/cache/filings.parquet; run scripts/fetch_filings.py first")
         keep = f["form"].isin(filings.OFFERING_FORMS | {"S-3", "F-3"}) | f["form"].str.startswith(
             ("8-K", "SC 13D", "SCHEDULE 13D", "SC 13G", "SCHEDULE 13G"))
         fil = {int(k): g.reset_index(drop=True) for k, g in f[keep].groupby("cik")}
@@ -171,7 +171,7 @@ def main():
     if need_fund or args.features:
         fund = fmod.load()
         if fund is None:
-            sys.exit("缺少 data/cache/fundamentals.parquet，先跑 scripts/fetch_fundamentals.py")
+            sys.exit("missing data/cache/fundamentals.parquet; run scripts/fetch_fundamentals.py first")
         fund = fund[fund["cik"].isin(set(u["cik"].astype(int)))]
     rows = list(zip(u["ticker"], u["cik"].astype(int)))
 
@@ -194,8 +194,8 @@ def main():
                "staged": summarize(sdf), "immediate": summarize(idf)}
     if not sdf.empty:
         sdf["entry_year"] = pd.to_datetime(sdf["entry_date"]).dt.year
-        sdf["timing"] = np.where(sdf["days_surge_to_signal"] <= 20, "10-20d 持续型",
-                                 np.where(sdf["days_surge_to_signal"] <= 45, "21-45d", "46-90d 二波"))
+        sdf["timing"] = np.where(sdf["days_surge_to_signal"] <= 20, "10-20d sustained",
+                                 np.where(sdf["days_surge_to_signal"] <= 45, "21-45d", "46-90d second wave"))
         summary["staged_by_year"] = {str(y): summarize(g) for y, g in sdf.groupby("entry_year")}
         sdf["period"] = np.where(sdf["entry_year"] <= 2023, "2019-2023", "2024-2026")
         summary["staged_by_period"] = {k: summarize(g) for k, g in sdf.groupby("period")}
