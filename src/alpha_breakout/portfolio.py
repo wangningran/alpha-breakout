@@ -1,14 +1,14 @@
-"""组合层面模拟：把逐笔回测的交易放进一个有资金、仓位上限的账户里。
+"""Portfolio-level simulation: put the per-trade backtest results into an account with capital and position limits.
 
-规则：
-- 每笔试仓承担账户 risk_per_trade 的风险（1R）。目标满仓资金 T = 1R 金额 / (试仓比例 × 止损幅度)，
-  且不超过账户 max_position_pct；各笔成交（试仓、加仓、分批卖出、清仓）按 legs 等比例放大。
-- 同时持仓数 ≤ max_positions，每天新开试仓 ≤ max_new_per_day，现金不够就缩小或跳过。
-- 同一天信号多于名额时按 order 挑选：random（随机）、rs60_asc（60 日相对强度从低到高，先做涨得少的）、
-  gm_change_desc（毛利率提升多的优先）、rev_yoy_desc（营收增速高的优先）；缺值的排最后，同值随机。
-  用多个随机种子重复，看结果分布。
-- idle_asset=IWM：没用掉的现金按 IWM 每日收盘涨跌计息，相当于“平时持有指数，有信号时卖出指数去试仓”。
-- 每日按收盘价盯市算权益和回撤。成交价含滑点（买入 ×(1+s)，卖出 ×(1−s)）。
+Rules:
+- Each probe risks risk_per_trade of the account (1R). Target full position capital T = 1R amount / (probe fraction x stop distance),
+  capped at max_position_pct of the account; every fill (probe, add, partial sell, exit) is scaled proportionally from legs.
+- Open positions <= max_positions, new probes per day <= max_new_per_day; shrink or skip when cash runs short.
+- When a day has more signals than slots, pick by order: random, rs60_asc (60-day relative strength low to high, smaller gainers first),
+  gm_change_desc (larger gross margin improvement first), rev_yoy_desc (higher revenue growth first); missing values go last, ties are random.
+  Repeat with multiple random seeds to see the distribution of results.
+- idle_asset=IWM: unused cash earns the IWM daily close-to-close return, i.e. "hold the index normally, sell it to fund a probe on a signal".
+- Equity and drawdown are marked to market at each daily close. Fills include slippage (buy x(1+s), sell x(1-s)).
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
     if order in ORDERS:
         col, asc = ORDERS[order]
         if col not in t:
-            raise ValueError(f"排序需要交易文件里有 {col} 列（回测时加 --features）")
+            raise ValueError(f"ordering requires a {col} column in the trades file (run the backtest with --features)")
         t["key"] = t[col] if asc else -t[col]
         t["key"] = t["key"].fillna(np.inf)
         by_entry = {d: g.sort_values(["key", "rnd"]) for d, g in t.groupby("entry_date")}
@@ -80,19 +80,19 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
         return cash + sum(p["shares"] * last_close.get(p["ticker"], p["last_px"]) for p in positions.values())
 
     for day in calendar:
-        # 0) 闲置现金按指数涨跌计息（上一个收盘到今天收盘）
+        # 0) idle cash earns the index return (previous close to today's close)
         if idle is not None:
             px_idle = idle.loc[day]
             if prev_idle is not None and cash > 0 and px_idle > 0:
                 cash *= px_idle / prev_idle
             prev_idle = px_idle
-        # 1) 已有持仓在今天的成交（加仓 / 分批卖出 / 清仓），先卖后买
+        # 1) today's fills for existing positions (add / partial sell / exit), sells before buys
         todays = []
         for pid, p in positions.items():
             for d, q, px in p["legs"]:
                 if d == day:
                     todays.append((q, pid, px))
-        for q, pid, px in sorted(todays, key=lambda x: x[0]):   # 卖出（q<0）排前面
+        for q, pid, px in sorted(todays, key=lambda x: x[0]):   # sells (q<0) first
             p = positions[pid]
             if q < 0:
                 sell = min(p["shares"], -q * p["scale"])
@@ -101,7 +101,7 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
             else:
                 want = q * p["scale"]
                 cost = want * px * (1 + slippage)
-                if cost > cash:  # 现金不够就只加能加的部分
+                if cost > cash:  # not enough cash: add only what we can afford
                     want = max(0.0, cash / (px * (1 + slippage)))
                     cost = want * px * (1 + slippage)
                 cash -= cost
@@ -109,10 +109,10 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
             p["last_px"] = px
         for pid in [pid for pid, p in positions.items() if p["exit_date"] == day]:
             p = positions.pop(pid)
-            if p["shares"] > 1e-9:  # 理论上 legs 已清仓，这里兜底
+            if p["shares"] > 1e-9:  # legs should already be flat; this is a safety net
                 cash += p["shares"] * p["last_px"] * (1 - slippage)
 
-        # 2) 新试仓
+        # 2) new probes
         if day in by_entry:
             eq = equity_now()
             new_today = 0
@@ -142,7 +142,7 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
                 taken.append(row.Index)
                 new_today += 1
                 pos = positions[row.Index]
-                for d, q, px in [x for x in pos["legs"] if x[0] == day]:   # 当天就止损出局的情况
+                for d, q, px in [x for x in pos["legs"] if x[0] == day]:   # stopped out on the entry day
                     if q < 0:
                         sell = min(pos["shares"], -q * pos["scale"])
                         cash += sell * px * (1 - slippage)
@@ -151,7 +151,7 @@ def simulate(trades: pd.DataFrame, closes: dict[str, pd.Series], calendar: pd.Da
                 if pos["exit_date"] == day:
                     positions.pop(row.Index)
 
-        # 3) 收盘盯市
+        # 3) mark to market at the close
         for p in positions.values():
             s = closes.get(p["ticker"])
             if s is not None and day in s.index:

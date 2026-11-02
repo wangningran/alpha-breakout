@@ -1,8 +1,8 @@
-"""全市场 SEC 公告索引（只要日期、表格类型、8-K item），用于增发过滤和催化剂分类。
+"""Market-wide SEC filing index (dates, form types and 8-K items only), used for the offering filter and catalyst classification.
 
-缓存：data/cache/filings.parquet，列 [cik, date, form, items]。
-来源：data.sec.gov/submissions/CIK##########.json（recent 最多约 1000 条；
-不够覆盖起始日期时再拉附加的历史分页）。SEC 限速 10 req/s，这里控制在约 8 req/s。
+Cache: data/cache/filings.parquet, columns [cik, date, form, items].
+Source: data.sec.gov/submissions/CIK##########.json (recent holds about 1000 filings at most;
+when that does not reach the start date, the extra history pages are fetched too). SEC limit is 10 req/s; we stay around 8 req/s.
 """
 from __future__ import annotations
 
@@ -18,15 +18,15 @@ from . import sec
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data" / "cache" / "filings.parquet"
 
-# 增发相关：发行 / 定价说明书（424B1/B4/B5）、新注册（S-1/S-3/F-1/F-3）
+# Offering-related: offering / pricing prospectuses (424B1/B4/B5), new registrations (S-1/S-3/F-1/F-3)
 OFFERING_FORMS = {"424B1", "424B4", "424B5", "S-1", "S-3", "F-1", "F-3", "S-1/A", "F-1/A"}
-# 8-K item → 催化剂类别
+# 8-K item -> catalyst category
 ITEM_CATEGORY = [
-    ("1.01", "agreement"),     # 重大协议（合作、授权、并购协议等）
-    ("2.01", "acquisition"),   # 完成收购 / 处置
-    ("2.02", "earnings"),      # 财报
-    ("8.01", "other_event"),   # 其他重大事件（临床数据、产品等常放这里）
-    ("7.01", "reg_fd"),        # Reg FD 披露（新闻稿、路演材料）
+    ("1.01", "agreement"),     # material agreement (partnership, licensing, M&A agreement, etc.)
+    ("2.01", "acquisition"),   # completed acquisition / disposition
+    ("2.02", "earnings"),      # earnings
+    ("8.01", "other_event"),   # other material events (clinical data, products, etc. often go here)
+    ("7.01", "reg_fd"),        # Reg FD disclosure (press releases, roadshow materials)
 ]
 
 _lock = threading.Lock()
@@ -81,7 +81,7 @@ def fetch_all(ciks, since: str = "2018-06-01", refresh: bool = False, workers: i
 def _safe(cik, since):
     try:
         return _fetch_one(cik, since)
-    except Exception as e:  # 个别公司失败不影响整体，下次运行会补
+    except Exception as e:  # one company failing does not affect the rest; the next run fills it in
         print(f"[warn] filings CIK {cik}: {e}")
         return pd.DataFrame(columns=["cik", "date", "form", "items"])
 
@@ -99,7 +99,7 @@ def load() -> pd.DataFrame | None:
 
 
 def catalyst_label(f: pd.DataFrame, surge_date, before_days: int = 3, after_days: int = 1) -> str:
-    """异动日前后公告的类别（按 ITEM_CATEGORY 的优先级），无公告返回 none。"""
+    """Category of filings around the surge date (by ITEM_CATEGORY priority); returns none if there are none."""
     if f is None or f.empty:
         return "none"
     lo, hi = pd.Timestamp(surge_date) - pd.Timedelta(days=before_days), pd.Timestamp(surge_date) + pd.Timedelta(days=after_days)
@@ -123,11 +123,11 @@ NEW_13G = {"SC 13G", "SCHEDULE 13G"}
 
 
 def holder_features(f: pd.DataFrame | None, surge_date, until, before_days: int = 30) -> dict:
-    """异动前 before_days 天到 until（通常是试仓信号日）之间的大股东申报次数。
+    """Number of major-holder filings from before_days before the surge until `until` (usually the probe signal date).
 
-    new_13d  ：新的 13D（持股 ≥5% 且可能谋求影响公司，主动型）
-    amend_13d：13D 修订（增持、减持或意图变化，方向需要看正文）
-    new_13g  ：新的 13G（持股 ≥5% 的被动投资者，比如基金首次举牌）
+    new_13d  : new 13D (>=5% stake, may seek to influence the company; activist)
+    amend_13d: 13D amendment (stake increase, decrease or change of intent; the direction requires reading the text)
+    new_13g  : new 13G (>=5% passive investor, e.g. a fund's first disclosure)
     """
     out = {"new_13d": 0, "amend_13d": 0, "new_13g": 0}
     if f is None or f.empty:
@@ -141,7 +141,7 @@ def holder_features(f: pd.DataFrame | None, surge_date, until, before_days: int 
 
 
 def refresh_companies(ciks, since: str = "2018-06-01", log=print) -> pd.DataFrame:
-    """重新拉指定公司的公告（每日扫描时只刷新观察名单里的公司），合并进缓存。"""
+    """Re-fetch filings for the given companies (the daily scan only refreshes companies on the watch list) and merge them into the cache."""
     ciks = [int(c) for c in ciks]
     old = load()
     parts = [old[~old["cik"].isin(ciks)]] if old is not None else []
@@ -153,7 +153,7 @@ def refresh_companies(ciks, since: str = "2018-06-01", log=print) -> pd.DataFram
 
 
 def earnings_dates(f: pd.DataFrame | None) -> pd.DatetimeIndex:
-    """历史财报发布日：8-K 且 item 含 2.02（Results of Operations），去重排序。"""
+    """Historical earnings release dates: 8-K with item 2.02 (Results of Operations), deduplicated and sorted."""
     if f is None or f.empty:
         return pd.DatetimeIndex([])
     m = f["form"].str.startswith("8-K") & f["items"].str.contains("2.02", regex=False)
@@ -161,15 +161,15 @@ def earnings_dates(f: pd.DataFrame | None) -> pd.DatetimeIndex:
 
 
 def days_to_next_earnings(ed: pd.DatetimeIndex, date, default_gap: int = 91) -> float:
-    """按 date 当天已知的财报日推算下一次财报，返回还有多少个日历日（可能为负 = 已过预计日期但还没发）。
+    """Project the next earnings date from those known as of `date` and return the calendar days until it (negative = expected date passed but not yet reported).
 
-    预计间隔 = 最近 4 次财报间隔的中位数（不足时用 91 天）。没有历史财报返回 NaN。
+    Expected gap = median of the last 4 earnings gaps (91 days if there are too few). Returns NaN if there are no past earnings.
     """
     date = pd.Timestamp(date)
     past = ed[ed <= date]
     if len(past) == 0:
         return float("nan")
     gaps = pd.Series(past[-5:]).diff().dt.days.dropna()
-    gaps = gaps[(gaps > 45) & (gaps < 200)]  # 去掉同季度重复的 2.02（更正、补充公告）
+    gaps = gaps[(gaps > 45) & (gaps < 200)]  # drop duplicate 2.02s within the same quarter (corrections, supplements)
     gap = float(gaps.median()) if len(gaps) else default_gap
     return float((past[-1] + pd.Timedelta(days=gap) - date).days)

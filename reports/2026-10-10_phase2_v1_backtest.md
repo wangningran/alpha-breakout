@@ -1,127 +1,127 @@
-# 第二阶段：策略 v1「异动 → 观察 → 试仓 → 加仓」全市场回测
+# Phase 2: Strategy v1 "surge -> watch -> probe -> add" full-market backtest
 
-- 日期：2026-10-10
-- 股票池：SEC 列表中目前在 Nasdaq / NYSE 上市、能拿到 SEC 股本数据的普通股，共 4956 支。全行业，**不含已退市股票**（按用户要求）。
-- 行情：Yahoo Finance 日线，2018-06 到 2026-10-09。回测区间从 2019-06-01 开始。
-- 市值：按时点估算，= 当日真实收盘价（还原拆股调整）× 当时已披露的最近一期股本（SEC XBRL，封面股本滞后 5 天、加权平均股本滞后 45 天才使用）。
-- 复现：
-  - `python scripts/build_universe.py`：建股票池并下载行情，首次约 25 分钟；
-  - `python scripts/backtest.py --config configs/strategy_v1.yaml --tag v1`：跑回测（脚本原名 backtest_v1.py，第四阶段改名），约 75 秒；
-  - 参数变体用 `--set 键=值`。
-- 明细：
-  - `reports/data/trades_v1_staged.csv`、`trades_v1_immediate.csv`：v1 和对照组的逐笔交易；
-  - `reports/data/summary_*.json`：每个变体的汇总。
+- Date: 2026-10-10
+- Universe: common stocks from the SEC list that are currently listed on Nasdaq / NYSE and have SEC share-count data, 4956 in total. All sectors, **excluding delisted stocks** (per the user's request).
+- Prices: Yahoo Finance daily bars, 2018-06 to 2026-10-09. The backtest period starts 2019-06-01.
+- Market cap: estimated point-in-time, = that day's actual close (split adjustment reversed) x the most recent share count disclosed at the time (SEC XBRL; cover-page shares are used with a 5-day lag, weighted-average shares with a 45-day lag).
+- Reproduce:
+  - `python scripts/build_universe.py`: builds the universe and downloads prices, about 25 minutes the first time;
+  - `python scripts/backtest.py --config configs/strategy_v1.yaml --tag v1`: runs the backtest (the script was originally named backtest_v1.py and was renamed in Phase 4), about 75 seconds;
+  - Parameter variants use `--set key=value`.
+- Details:
+  - `reports/data/trades_v1_staged.csv`, `trades_v1_immediate.csv`: trade-by-trade results for v1 and the control group;
+  - `reports/data/summary_*.json`: the summary for each variant.
 
-## 1. 结论
+## 1. Conclusions
 
-1. **分批建仓比"异动后直接追"好得多**。同一批异动，次日开盘满仓追进去（对照组）的结果：12795 笔，期望 -0.09R，累计 -1196R，两个时间段都亏。v1 的结果：4675 笔，期望 +0.05R，累计 +221R。观察期和试仓这两步，把大量追高亏损挡在了门外。
-2. **但 v1 本身还没有稳定的优势**，主要有两个证据：
-   - 收益几乎全部来自 2020 年（+819R）。2021、2022、2023、2026 四年都是亏的，2024–2026 合计期望 -0.07R。
-   - 收益高度依赖少数极端赢家：收益最高的 1% 交易贡献了 +1781R，而总共才 +221R。去掉这 1% 后期望是 -0.34R；单笔收益封顶 20R 后是 -0.14R。
-3. **11 个参数变体在 2024–26 年全部为负**（见第 3 节）。2019–23 年全部为正，但那段时间的幸存者偏差最大（见第 6 节）。这说明问题不在参数，而在于规则本身还缺少能区分"真趋势"和"拉高出货"的信息。
-4. **用户关心的"第二波"能抓到，但整体上第二波的期望最低**：
-   - SDGR 2023-03-01 异动后，第 56 天（2023-05-19）创出异动以来新高，触发试仓；5-23 加仓，7-25 出场，+34%（6.8R）。
-   - 但从全市场看，异动后 46–90 天才入场的第二波交易有 1427 笔，期望 -0.13R。异动后 10–20 天就创新高的持续型交易有 1781 笔，期望 +0.20R。
-5. **胜率和盈亏结构符合"低胜率、高赔率"的设想**，只是还不够正：
-   - 胜率 25%，赢的时候平均 +4.1R，输的时候平均 -1.27R；
-   - 只有 1/3 的试仓走到了加仓这一步；
-   - 最大回撤 -719R，最长连亏 60 笔。按每笔 1R = 0.25% 的账户风险算，回撤大约是 -180%，**目前不能实盘**。
+1. **Scaling in is much better than "chasing right after the surge"**. On the same set of surges, buying a full position at the next day's open (control group) gave: 12795 trades, expectancy -0.09R, cumulative -1196R, losing in both time periods. v1 gave: 4675 trades, expectancy +0.05R, cumulative +221R. The watch period and the probe step kept a large share of chase-the-high losses out.
+2. **But v1 itself does not yet have a stable edge**, mainly on two pieces of evidence:
+   - Nearly all of the return comes from 2020 (+819R). 2021, 2022, 2023, and 2026 were all losing years, and 2024-2026 combined had an expectancy of -0.07R.
+   - Returns depend heavily on a few extreme winners: the top 1% of trades by return contributed +1781R, while the total is only +221R. Removing that 1% gives an expectancy of -0.34R; capping each trade at 20R gives -0.14R.
+3. **All 11 parameter variants are negative in 2024-26** (see Section 3). All are positive in 2019-23, but that is the period with the largest survivorship bias (see Section 6). This says the problem is not the parameters but that the rules still lack information that separates "real trends" from "pump and dumps".
+4. **The "second wave" the user cares about can be caught, but overall the second wave has the lowest expectancy**:
+   - After SDGR's 2023-03-01 surge, on day 56 (2023-05-19) it made a new high since the surge, triggering a probe; add on 5-23, exit on 7-25, +34% (6.8R).
+   - But across the full market, there were 1427 second-wave trades entered 46-90 days after the surge, with an expectancy of -0.13R. There were 1781 sustained trades that made a new high 10-20 days after the surge, with an expectancy of +0.20R.
+5. **The win rate and payoff structure match the "low win rate, high payoff" idea, just not positive enough yet**:
+   - Win rate 25%, average win +4.1R, average loss -1.27R;
+   - Only 1/3 of probes made it to the add step;
+   - Max drawdown -719R, longest losing streak 60 trades. At 1R per trade = 0.25% of account risk, the drawdown is roughly -180%, **so it cannot be traded live yet**.
 
-## 2. v1 规则
+## 2. v1 rules
 
-参数都在 `configs/strategy_v1.yaml`。所有判断都用收盘后的数据，次日开盘执行。
+All parameters are in `configs/strategy_v1.yaml`. All decisions use post-close data and execute at the next day's open.
 
-| 环节 | 规则 |
+| Stage | Rule |
 | --- | --- |
-| 股票池 | 当时真实股价 ≥ 1 美元；市值 1–30 亿美元；20 日平均成交额 ≥ 200 万美元 |
-| 异动入池 | 单日涨幅 ≥ 12% 且量比 ≥ 3，或 5 日涨幅 ≥ 30% |
-| 观察 | 最多 90 个交易日。收盘跌回异动前的价格就作废；至少观察 10 天 |
-| 试仓（1/3） | 观察期满后，同时满足：收盘创异动以来新高、量比 ≥ 1.5、收盘在 20 日线上方、20 日线向上。下一个开盘价买入 |
-| 止损 | 近 10 日最低点，但最多亏 15%（实际多数交易都落在 15%） |
-| 加仓（2/3） | 收盘浮盈达到 1R 就在次日开盘加仓。试仓 20 天内没到 1R 就出局（验证失败） |
-| 出场 | 触及止损；或加仓后收盘跌破 20 日线；或持有满 120 天 |
-| 再试 | 试仓失败后，只要异动还没作废，可以再等下一次新高，最多试 2 次 |
-| 成本 | 每次成交单边滑点 0.5% |
+| Universe | Actual share price at the time >= $1; market cap $100M-$3B; 20-day average dollar volume >= $2M |
+| Surge into watchlist | Single-day gain >= 12% and volume ratio >= 3, or 5-day gain >= 30% |
+| Watch | At most 90 trading days. Invalidated if the close falls back to the pre-surge price; watch for at least 10 days |
+| Probe (1/3) | After the minimum watch period, all of: close at a new high since the surge, volume ratio >= 1.5, close above the 20-day MA, 20-day MA rising. Buy at the next open |
+| Stop | Lowest low of the last 10 days, but a loss of at most 15% (in practice most trades land on 15%) |
+| Add (2/3) | Once the closing open profit reaches 1R, add at the next day's open. If the probe hasn't reached 1R within 20 days, exit (validation failed) |
+| Exit | Stop hit; or close below the 20-day MA after adding; or held for 120 days |
+| Retry | After a failed probe, as long as the surge hasn't been invalidated, wait for the next new high; at most 2 attempts |
+| Costs | 0.5% one-way slippage per fill |
 
-R 的口径：以试仓那 1/3 仓位承担的风险为 1R。对照组满仓入场，以满仓承担的风险为 1R。
+Definition of R: 1R is the risk carried by the 1/3 probe position. The control group enters with a full position, and 1R is the risk carried by the full position.
 
-**漏斗**：
-- 9175 次异动入池；
-- 其中 4246 次在观察期内跌回异动前价格，作废；
-- 1002 次 90 天内没有出现入场信号，过期；
-- 最终产生 4675 笔试仓（包括第 2 次尝试）。
+**Funnel**:
+- 9175 surges entered the watchlist;
+- of those, 4246 fell back to the pre-surge price during the watch period and were invalidated;
+- 1002 had no entry signal within 90 days and expired;
+- in the end 4675 probes were generated (including second attempts).
 
-## 3. 参数敏感性（每次只改一项）
+## 3. Parameter sensitivity (one change at a time)
 
-| 版本 | 改动 | 交易数 | 胜率 | 期望(R) | 总R | 最大回撤(R) | 最长连亏 | 2019–23 期望 | 2024–26 期望 |
+| Version | Change | Trades | Win rate | Expectancy (R) | Total R | Max drawdown (R) | Longest losing streak | 2019-23 expectancy | 2024-26 expectancy |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| v1 | 基准 | 4675 | 25% | +0.048 | +221 | -719 | 60 | +0.153 | -0.072 |
-| v1_wait45 | 观察期上限 90 → 45 天 | 3506 | 23% | +0.081 | +283 | -640 | 62 | +0.232 | -0.088 |
-| v1_att1 | 只试 1 次 | 3929 | 24% | +0.041 | +160 | -653 | 58 | +0.151 | -0.084 |
-| v1_vol25 | 入场量比 1.5 → 2.5 | 2583 | 23% | +0.032 | +83 | -385 | 36 | +0.159 | -0.099 |
-| v1_be | 加仓后止损提到保本 | 4813 | 24% | +0.030 | +142 | -710 | 71 | +0.121 | -0.074 |
-| v1_obs5 | 最短观察 10 → 5 天 | 5511 | 24% | +0.013 | +70 | -920 | 66 | +0.127 | -0.114 |
-| v1_onestep | 不分批，一次满仓 | 4675 | 35% | +0.011 | +50 | -403 | 48 | +0.061 | -0.046 |
-| v1_mkt | 大盘过滤（IWM > 200 日线） | 3802 | 24% | +0.005 | +19 | -577 | 109 | +0.165 | -0.132 |
-| v1_obs20 | 最短观察 10 → 20 天 | 3616 | 25% | -0.006 | -23 | -584 | 79 | +0.112 | -0.140 |
-| v1_stop10 | 最大止损 15% → 10% | 4929 | 18% | -0.030 | -147 | -1163 | 80 | +0.090 | -0.163 |
-| v1_ma10 | 跟踪均线 20 → 10 日 | 4707 | 27% | -0.141 | -658 | -766 | 54 | -0.202 | -0.072 |
-| 对照组 | 异动次日直接满仓 | 12795 | 28% | -0.094 | -1196 | -1306 | 70 | -0.075 | -0.116 |
+| v1 | Baseline | 4675 | 25% | +0.048 | +221 | -719 | 60 | +0.153 | -0.072 |
+| v1_wait45 | Max watch period 90 -> 45 days | 3506 | 23% | +0.081 | +283 | -640 | 62 | +0.232 | -0.088 |
+| v1_att1 | Only 1 attempt | 3929 | 24% | +0.041 | +160 | -653 | 58 | +0.151 | -0.084 |
+| v1_vol25 | Entry volume ratio 1.5 -> 2.5 | 2583 | 23% | +0.032 | +83 | -385 | 36 | +0.159 | -0.099 |
+| v1_be | Raise stop to breakeven after adding | 4813 | 24% | +0.030 | +142 | -710 | 71 | +0.121 | -0.074 |
+| v1_obs5 | Min watch 10 -> 5 days | 5511 | 24% | +0.013 | +70 | -920 | 66 | +0.127 | -0.114 |
+| v1_onestep | No scaling, full position at once | 4675 | 35% | +0.011 | +50 | -403 | 48 | +0.061 | -0.046 |
+| v1_mkt | Market filter (IWM > 200-day MA) | 3802 | 24% | +0.005 | +19 | -577 | 109 | +0.165 | -0.132 |
+| v1_obs20 | Min watch 10 -> 20 days | 3616 | 25% | -0.006 | -23 | -584 | 79 | +0.112 | -0.140 |
+| v1_stop10 | Max stop 15% -> 10% | 4929 | 18% | -0.030 | -147 | -1163 | 80 | +0.090 | -0.163 |
+| v1_ma10 | Trailing MA 20 -> 10 days | 4707 | 27% | -0.141 | -658 | -766 | 54 | -0.202 | -0.072 |
+| Control group | Full position the day after the surge | 12795 | 28% | -0.094 | -1196 | -1306 | 70 | -0.075 | -0.116 |
 
-一次满仓（v1_onestep）和分批（v1）入场点完全相同，期望 R 不能直接比，因为两者 1R 的口径不同。但分批版本单笔亏损小、右尾更长，更接近"小仓位验证、成功再加"的设计意图。
+Full position at once (v1_onestep) and scaling in (v1) have exactly the same entry points, but their expectancy in R can't be compared directly because 1R is defined differently in each. The scaled version has smaller per-trade losses and a longer right tail, which is closer to the design intent of "validate with a small position, add on success".
 
-## 4. 分年度（v1）
+## 4. By year (v1)
 
-| 年份 | 交易数 | 胜率 | 期望(R) | 总R |
+| Year | Trades | Win rate | Expectancy (R) | Total R |
 | --- | --- | --- | --- | --- |
-| 2019（6 月起） | 125 | 22% | +0.37 | +46 |
+| 2019 (from June) | 125 | 22% | +0.37 | +46 |
 | 2020 | 907 | 30% | +0.90 | +819 |
 | 2021 | 577 | 25% | -0.22 | -128 |
 | 2022 | 353 | 15% | -0.73 | -257 |
 | 2023 | 503 | 25% | -0.20 | -102 |
 | 2024 | 649 | 24% | +0.02 | +13 |
 | 2025 | 917 | 25% | -0.04 | -37 |
-| 2026（至 10-09） | 644 | 21% | -0.21 | -132 |
+| 2026 (through 10-09) | 644 | 21% | -0.21 | -132 |
 
-## 5. 按入场时机、异动类型分组（v1）
+## 5. By entry timing and surge type (v1)
 
-| 分组 | 交易数 | 期望(R) | 总R |
+| Group | Trades | Expectancy (R) | Total R |
 | --- | --- | --- | --- |
-| 异动后 10–20 天入场（持续型） | 1781 | +0.20 | +361 |
-| 21–45 天 | 1467 | +0.04 | +51 |
-| 46–90 天（第二波） | 1427 | -0.13 | -190 |
-| 第 1 次尝试 | 3731 | +0.08 | +307 |
-| 第 2 次尝试 | 944 | -0.09 | -86 |
-| 单日放量大阳入池 | 1788 | +0.02 | +26 |
-| 5 日涨 30% 入池 | 1793 | +0.18 | +322 |
-| 两条同时满足 | 1094 | -0.12 | -127 |
+| Entered 10-20 days after the surge (sustained) | 1781 | +0.20 | +361 |
+| 21-45 days | 1467 | +0.04 | +51 |
+| 46-90 days (second wave) | 1427 | -0.13 | -190 |
+| 1st attempt | 3731 | +0.08 | +307 |
+| 2nd attempt | 944 | -0.09 | -86 |
+| Entered on a single-day high-volume long green bar | 1788 | +0.02 | +26 |
+| Entered on a 5-day 30% gain | 1793 | +0.18 | +322 |
+| Both conditions met | 1094 | -0.12 | -127 |
 
-这些分组里，只有"持续型"在两个时间段都还说得过去，但样本拆细以后噪声很大。我没有据此改规则，避免过拟合。
+Among these groups, only "sustained" looks acceptable in both time periods, but once the sample is sliced this finely the noise is large. I did not change the rules based on this, to avoid overfitting.
 
-**样本股在 v1 下的结果：**
+**Sample tickers under v1:**
 
-| 代码 | 异动日 | 试仓信号 | 入场 | 加仓 | 出场 | 结果 |
+| Ticker | Surge date | Probe signal | Entry | Add | Exit | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| PRME | 2025-06-06 | 2025-06-23（第 10 天） | 2.28 | 2025-06-27 @ 2.70 | 2025-07-30 @ 3.90，跌破 20 日线 | +52%，10.4R |
-| SDGR | 2023-03-01 | 2023-05-19（第 56 天，第二波） | 33.26 | 2023-05-23 @ 38.67 | 2023-07-25 @ 49.69，跌破 20 日线 | +34%，6.8R |
-| SDGR | 2022-12-13 | 2023-01-12 | 23.11 | 2023-02-03 @ 26.83 | 2023-02-10 @ 22.98 | -11%，-2.1R |
-| SDGR | 2023-11-02 / 2025-01-22 / 2026-09-15 | — | — | 未加仓 | 止损 | 每次约 -1.1R 到 -1.5R |
-| PRME | 2024-05-02 / 2025-09-09 | — | — | 未加仓 | 止损 | 每次 -1.06R |
+| PRME | 2025-06-06 | 2025-06-23 (day 10) | 2.28 | 2025-06-27 @ 2.70 | 2025-07-30 @ 3.90, broke the 20-day MA | +52%, 10.4R |
+| SDGR | 2023-03-01 | 2023-05-19 (day 56, second wave) | 33.26 | 2023-05-23 @ 38.67 | 2023-07-25 @ 49.69, broke the 20-day MA | +34%, 6.8R |
+| SDGR | 2022-12-13 | 2023-01-12 | 23.11 | 2023-02-03 @ 26.83 | 2023-02-10 @ 22.98 | -11%, -2.1R |
+| SDGR | 2023-11-02 / 2025-01-22 / 2026-09-15 | - | - | no add | stop | about -1.1R to -1.5R each |
+| PRME | 2024-05-02 / 2025-09-09 | - | - | no add | stop | -1.06R each |
 
-## 6. 局限（结果偏乐观的地方）
+## 6. Limitations (where results are biased optimistic)
 
-- **幸存者偏差**：股票池只有现在还在交易的公司。2019–2023 年异动后退市、被并购的票都不在里面，越早的年份偏差越大。2019–23 年为正、2024–26 年为负，这个差异有一部分可能就是偏差造成的。
-- **极端值和数据质量**：收益最高的几笔里，有 NXH 2020 年那笔（+1140%，"代码复用"嫌疑，需要核实），还有 MGRT 2026 年那笔（日均成交只有约 3 万股，实际很难成交）。还没有做流通盘过滤和代码变更检查。
-- 止损按"盘中触及即以止损价成交"计算，跳空低开时按开盘价。小盘股的实际滑点可能比 0.5% 大。
-- 目前是逐笔统计，没有做组合层面的资金约束（同时持仓数、单日最多开几笔）。
-- 外国公司（20-F 申报）大多没有 SEC 股本数据，不在股票池里。
+- **Survivorship bias**: the universe only contains companies that still trade today. Tickers that were delisted or acquired after a surge in 2019-2023 are not in it, and the bias grows the earlier the year. 2019-23 being positive and 2024-26 being negative may partly be caused by this bias.
+- **Outliers and data quality**: among the top trades are NXH's 2020 trade (+1140%, suspected "ticker reuse", needs verification) and MGRT's 2026 trade (average daily volume only about 30k shares, very hard to actually fill). No float filter or ticker-change check has been done yet.
+- Stops are computed as "filled at the stop price on an intraday touch", and at the open on a gap down. Actual slippage on small caps may be larger than 0.5%.
+- Statistics are currently trade-by-trade, with no portfolio-level capital constraints (number of concurrent positions, maximum new trades per day).
+- Foreign companies (20-F filers) mostly lack SEC share-count data and are not in the universe.
 
-## 7. 下一步建议
+## 7. Suggested next steps
 
-v1 证明了"观察 + 试仓"的结构能大幅减少追高亏损，但还缺一个能区分"真趋势"和"拉高出货"的过滤器。下面几条都对应你流程里"开始研究"那一步，按优先级排：
+v1 shows that the "watch + probe" structure greatly reduces chase-the-high losses, but it still lacks a filter that separates "real trends" from "pump and dumps". Each of the items below corresponds to the "start research" step in your process, in priority order:
 
-1. **增发过滤**：小盘股暴涨后马上做 S-3 / 424B5 / S-1 增发很常见。规则：异动到试仓之间有增发公告就跳过。数据来自 SEC，有明确的逻辑依据，不算调参。
-2. **数据清洗**：日成交股数 / 流通盘门槛、代码复用检查，先把不可交易的极端值去掉再看结果。
-3. **催化剂类型**：用 8-K item 编号区分合作 / 并购（1.01）、财报（2.02）、其他事件（8.01）、无公告，看哪类异动的后续最好。
-4. **板块联动**：同一行业（SIC）同期有多支票异动时，看后续表现是否更好。
-5. **组合层面模拟**：设定每笔风险和最大持仓数，算真实的资金曲线和回撤。
+1. **Offering filter**: small caps very commonly file an S-3 / 424B5 / S-1 offering right after a big run-up. Rule: skip if there is an offering filing between the surge and the probe. The data comes from the SEC and has a clear logical basis, so this isn't parameter tuning.
+2. **Data cleaning**: daily share volume / float thresholds and ticker-reuse checks; remove untradeable outliers first, then look at the results.
+3. **Catalyst type**: use 8-K item numbers to separate partnership / M&A (1.01), earnings (2.02), other events (8.01), and no filing, and see which type of surge has the best follow-through.
+4. **Sector co-movement**: when several tickers in the same industry (SIC) surge in the same period, check whether the follow-through is better.
+5. **Portfolio-level simulation**: set risk per trade and maximum positions, and compute the real equity curve and drawdown.

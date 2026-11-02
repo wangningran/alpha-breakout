@@ -1,16 +1,16 @@
-"""基本面时点数据（SEC XBRL frames API，全市场按季度拉取）。
+"""Point-in-time fundamentals (SEC XBRL frames API, fetched for the whole market by quarter).
 
-每个概念、每个季度一次请求，得到全市场的值：
-  营收（季度）：Revenues → RevenueFromContractWithCustomerExcludingAssessedTax → SalesRevenueNet，按优先级取
-  净利润（季度）：NetIncomeLoss，亏损额作为“烧钱速度”的近似（含非现金项目，偏保守）
-  毛利（季度）：GrossProfit（很多公司不单独报，缺失较多）
-  现金（时点）：CashAndCashEquivalentsAtCarryingValue（缺失时用含受限现金的口径）
-              + 短期投资 / 可售证券（生物科技公司大量现金放在这里）
+One request per concept per quarter returns the values for the whole market:
+  revenue (quarterly): Revenues -> RevenueFromContractWithCustomerExcludingAssessedTax -> SalesRevenueNet, in priority order
+  net income (quarterly): NetIncomeLoss; the loss is a proxy for "burn rate" (includes non-cash items, conservative)
+  gross profit (quarterly): GrossProfit (many companies do not report it separately; often missing)
+  cash (point in time): CashAndCashEquivalentsAtCarryingValue (falls back to the measure including restricted cash)
+              + short-term investments / marketable securities (biotechs keep much of their cash here)
 
-防前视：所有数值在报告期末 + LAG_DAYS 天之后才视为可用（10-Q 一般 40–45 天内披露，
-10-K 60–90 天，这里统一按 75 天，偏保守）。
+No look-ahead: every value counts as available only LAG_DAYS days after the period end (10-Q usually filed within 40-45 days,
+10-K within 60-90 days; a flat 75 days is used here, conservative).
 
-缓存：data/cache/fundamentals.parquet，列 [cik, concept, end, val, avail]。
+Cache: data/cache/fundamentals.parquet, columns [cik, concept, end, val, avail].
 """
 from __future__ import annotations
 
@@ -52,13 +52,13 @@ def fetch(start_year: int = 2017, refresh: bool = False, log=print) -> pd.DataFr
                 break
             recent = (today - q_end).days < 200
             for key, concept in list(DURATION.items()) + list(INSTANT.items()):
-                if key == "rev_3" and y >= 2020:  # SalesRevenueNet 2019 年后基本停用，frame 不存在，跳过避免反复 404
+                if key == "rev_3" and y >= 2020:  # SalesRevenueNet is basically retired after 2019 and the frame does not exist; skip to avoid repeated 404s
                     continue
                 period = f"CY{y}Q{q}" + ("I" if key in INSTANT else "")
                 try:
                     d = sec._cached_json(f"frame_{concept}_{period}.json",
                                          URL.format(concept=concept, period=period), refresh, static=not recent)
-                except Exception as e:  # 有些概念在早期季度没有 frame，跳过即可
+                except Exception as e:  # some concepts have no frame in early quarters; just skip
                     log(f"[warn] {concept} {period}: {e}")
                     continue
                 rows += [(r["cik"], key, r["end"], r["val"]) for r in d.get("data", [])]
@@ -77,7 +77,7 @@ def load() -> pd.DataFrame | None:
 
 
 def company_table(df: pd.DataFrame, cik: int) -> pd.DataFrame:
-    """把一家公司的长表整理成按报告期末的宽表：revenue, net_income, cash_total。"""
+    """Reshape one company's long table into a wide table by period end: revenue, net_income, cash_total."""
     d = df[df["cik"] == cik]
     if d.empty:
         return pd.DataFrame()
@@ -102,17 +102,17 @@ def _first(w: pd.DataFrame, cols: list[str]) -> pd.Series:
 
 
 def features_at(tab: pd.DataFrame, date) -> dict:
-    """date 当天可见的基本面特征。缺数据的字段为 NaN。
+    """Fundamental features visible as of `date`. Missing fields are NaN.
 
-    rev_yoy        ：最近一个季度营收同比
-    rev_yoy_prev   ：上一个季度的营收同比
-    rev_accel      ：rev_yoy > rev_yoy_prev（营收增速加快）
-    revenue_q      ：最近季度营收（美元）
-    gross_margin   ：最近季度毛利率
-    gm_change      ：毛利率比去年同季度的变化（百分点，0.05 = 提高 5 个点）
-    ni_improve     ：最近季度净利润比去年同季度改善（亏损收窄或盈利增加）为 1
-    runway_q       ：现金 / 季度亏损额（季度数）；盈利公司记为 inf
-    profitable     ：最近季度净利润 > 0
+    rev_yoy        : revenue YoY growth for the latest quarter
+    rev_yoy_prev   : revenue YoY growth for the previous quarter
+    rev_accel      : rev_yoy > rev_yoy_prev (revenue growth accelerating)
+    revenue_q      : latest quarterly revenue (USD)
+    gross_margin   : latest quarterly gross margin
+    gm_change      : gross margin change vs the same quarter last year (percentage points, 0.05 = up 5 points)
+    ni_improve     : 1 if latest quarterly net income improved vs the same quarter last year (smaller loss or larger profit)
+    runway_q       : cash / quarterly loss (in quarters); inf for profitable companies
+    profitable     : latest quarterly net income > 0
     """
     nan = {"rev_yoy": np.nan, "rev_yoy_prev": np.nan, "rev_accel": np.nan,
            "runway_q": np.nan, "profitable": np.nan, "revenue_q": np.nan,
@@ -160,7 +160,7 @@ def _same_q_last_year(s: pd.Series, end):
 
 
 def _yoy(rev: pd.Series, end) -> float:
-    """end 那个季度对去年同季度的增速（允许 ±20 天的期末日期偏差）。"""
+    """Growth of the `end` quarter vs the same quarter last year (allows +/-20 days of period-end mismatch)."""
     target = end - pd.DateOffset(years=1)
     near = rev[(rev.index >= target - pd.Timedelta(days=20)) & (rev.index <= target + pd.Timedelta(days=20))]
     if near.empty or near.iloc[-1] <= 0:

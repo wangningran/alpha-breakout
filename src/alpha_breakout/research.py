@@ -1,20 +1,20 @@
-"""“研究”环节的量化部分：大股东申报（13D/13G）和基本面特征，以及据此生成的试仓前检查。
+"""Quantitative part of the "research" step: major-holder filings (13D/13G) and fundamental features, plus the pre-probe check built from them.
 
-配置（strategy yaml 的 filters 节）：
+Config (the filters section of the strategy yaml):
   holders:
     require: none           # none / new_13d / any_13d / any_13d_or_13g
-    before_days: 30         # 从异动前多少天开始算
+    before_days: 30         # how many days before the surge to start counting
   fundamentals:
-    min_runway_q: null      # 现金至少能撑几个季度（亏损公司）；null = 不检查
-    min_rev_yoy: null       # 最近季度营收同比下限，例如 0.2；null = 不检查
-    require_accel: false    # 要求营收增速加快
-    min_gm_change: null     # 毛利率同比至少提高多少（0.02 = 2 个百分点）；null = 不检查
-    allow_missing: true     # 缺数据时是否放行
+    min_runway_q: null      # minimum quarters of cash (loss-making companies); null = no check
+    min_rev_yoy: null       # minimum latest-quarter revenue YoY, e.g. 0.2; null = no check
+    require_accel: false    # require accelerating revenue growth
+    min_gm_change: null     # minimum YoY gross margin improvement (0.02 = 2 percentage points); null = no check
+    allow_missing: true     # whether to let it through when data is missing
   momentum:
-    max_rs60: null          # 试仓日 60 日相对 IWM 超额涨幅上限（0.5 = 50%），排除涨得太远的；null = 不检查
+    max_rs60: null          # cap on the 60-day excess return vs IWM on the probe date (0.5 = 50%), excludes names that ran too far; null = no check
   earnings:
-    avoid_before_days: null # 预计下次财报前 N 个日历日内不试仓（按历史 8-K item 2.02 推算）；null = 不检查
-    overdue_days: 0         # 已过预计财报日、但还没发布的前 N 天也不试仓（财报随时可能出来）
+    avoid_before_days: null # no probe within N calendar days before the expected next earnings (projected from past 8-K item 2.02); null = no check
+    overdue_days: 0         # also no probe for the first N days past the expected earnings date while not yet reported (earnings could land any time)
 """
 from __future__ import annotations
 

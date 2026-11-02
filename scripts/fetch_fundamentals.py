@@ -1,6 +1,6 @@
-"""拉全市场季度基本面（SEC XBRL frames），首次约 5 分钟。
+"""Fetch market-wide quarterly fundamentals (SEC XBRL frames); about 5 minutes the first time.
 
-用法：python scripts/fetch_fundamentals.py [--refresh]
+Usage: python scripts/fetch_fundamentals.py [--refresh]
 """
 from __future__ import annotations
 

@@ -1,17 +1,17 @@
-"""前后分段验证：只用训练期挑选过滤条件，看它们在测试期的表现。
+"""Walk-forward check: pick filter conditions using only the training period, then see how they do in the test period.
 
-用法：
+Usage:
     python scripts/backtest.py --tag v3b_feat --features --config configs/strategy_v4.yaml \
         --set filters.fundamentals.min_rev_yoy=null filters.fundamentals.min_gm_change=null \
               filters.fundamentals.allow_missing=true position.partial_r=null position.after_partial_trail_ma=null
     python scripts/walk_forward.py --tag v3b_feat [--split 2023-01-01] [--min-train 100]
 
-读取不带任何基本面过滤的基准交易（带 --features 特征列），对过滤条件网格做事后筛选：
-营收同比下限 × 现金跑道下限 × 毛利率是否提升 ≥ 2 个点 × 60 日相对强度上限。
-按训练期（split 之前入场）的封顶 20R 期望排序，输出前 10 名在测试期的表现。
+Reads the baseline trades with no fundamental filters (with the --features columns) and screens a grid of filter conditions after the fact:
+revenue YoY floor x cash runway floor x gross margin up >= 2 points x 60-day relative strength cap.
+Ranks by capped-at-20R expectancy in the training period (entries before split) and prints the top 10's test-period results.
 
-注意：这是事后筛选，和引擎里真正逐日执行过滤不完全一样（引擎里被过滤掉的信号之后还可能再次触发），
-挑出来的组合要再用 backtest.py 跑一遍确认。
+Note: this is an after-the-fact screen, not exactly the same as the engine applying filters day by day (a signal filtered out in the engine can trigger again later),
+so rerun the chosen combinations through backtest.py to confirm.
 """
 from __future__ import annotations
 
@@ -53,14 +53,14 @@ def main():
     g = pd.DataFrame(grid)
     ok = g[g.n_train >= a.min_train].sort_values("train_cap", ascending=False)
     pd.set_option("display.width", 200)
-    print(f"训练期 < {a.split}，测试期 ≥ {a.split}；按训练期封顶期望排序的前 10 名：")
+    print(f"train < {a.split}, test >= {a.split}; top 10 by capped training-period expectancy:")
     print(ok.head(10).round(3).to_string(index=False))
     base = g[g.rev.isna() & g.run.isna() & ~g.gm & g.rs.isna()]
-    print("\n不加过滤：")
+    print("\nNo filters:")
     print(base.round(3).to_string(index=False))
-    print(f"\n训练期与测试期排名的相关系数（Spearman，{len(ok)} 个组合）：",
+    print(f"\nSpearman correlation of train vs test ranks ({len(ok)} combinations):",
           round(ok[["train_cap", "test_cap"]].corr(method="spearman").iloc[0, 1], 3))
-    print("前 10 名中测试期为正的比例：", (ok.head(10).test_cap > 0).mean())
+    print("Share of the top 10 with a positive test period:", (ok.head(10).test_cap > 0).mean())
 
 
 if __name__ == "__main__":

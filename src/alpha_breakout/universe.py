@@ -1,12 +1,12 @@
-"""全市场股票池 + 按时点估算的市值。
+"""Market-wide stock universe + point-in-time market cap estimates.
 
-- 代码列表：SEC company_tickers_exchange.json，只留 Nasdaq / NYSE 的普通股
-  （去掉权证、单位、优先股等）。只包含目前仍在交易的公司，不含退市股。
-- 股本：SEC XBRL frames API，按季度拉全市场一次，得到每家公司的股本时间序列。
-  主来源 dei:EntityCommonStockSharesOutstanding（封面股本，截止日≈申报日，滞后 5 天可见）；
-  没有封面股本的公司（多类股等）用 us-gaap:WeightedAverageNumberOfSharesOutstandingBasic
-  （季度加权平均股本，期末后 45 天才可见）补上。
-- 市值 ≈ 当日真实收盘价（RawClose）× 当时最近一次披露的股本。
+- Ticker list: SEC company_tickers_exchange.json, keeping only Nasdaq / NYSE common stock
+  (warrants, units, preferred shares, etc. removed). Only currently traded companies; delisted stocks are not included.
+- Shares outstanding: SEC XBRL frames API, fetched for the whole market once per quarter, giving each company's share count over time.
+  Primary source dei:EntityCommonStockSharesOutstanding (cover-page shares, as-of date ~ filing date, visible after a 5-day lag);
+  companies without cover-page shares (multiple share classes, etc.) are filled in from us-gaap:WeightedAverageNumberOfSharesOutstandingBasic
+  (quarterly weighted average shares, visible 45 days after period end).
+- Market cap ~ actual close of the day (RawClose) x the most recently disclosed share count at that time.
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ def listed_common_stocks(refresh: bool = False) -> pd.DataFrame:
     df = df[df["exchange"].isin(EXCHANGES) & df["ticker"].notna()]
     t = df["ticker"].str.upper()
     bad = (
-        t.str.contains(r"[-./^ ]", regex=True)                                   # 优先股 / 分级 / 权证 (NYSE 写法)
-        | ((t.str.len() == 5) & t.str[-1].isin(list("WURZ")))                    # Nasdaq 五字母权证 / 单位 / 权利
+        t.str.contains(r"[-./^ ]", regex=True)                                   # preferred / class shares / warrants (NYSE notation)
+        | ((t.str.len() == 5) & t.str[-1].isin(list("WURZ")))                    # Nasdaq five-letter warrants / units / rights
         | df["name"].str.contains(r"\b(?:ETF|Fund|Trust)\b", case=False, regex=True)
     )
     df = df[~bad].assign(ticker=t)
@@ -37,7 +37,7 @@ def listed_common_stocks(refresh: bool = False) -> pd.DataFrame:
 
 def shares_history(start_year: int = 2018, end: pd.Timestamp | None = None,
                    refresh: bool = False) -> pd.DataFrame:
-    """返回 [cik, end, shares, avail]，avail = 这条股本数据可以被使用的最早日期。"""
+    """Return [cik, end, shares, avail]; avail = earliest date this share count may be used."""
     end = end or pd.Timestamp.today()
     rows = []
     for y in range(start_year, end.year + 1):
@@ -61,7 +61,7 @@ def shares_history(start_year: int = 2018, end: pd.Timestamp | None = None,
 
 
 def shares_series(sh: pd.DataFrame, cik: int, index: pd.DatetimeIndex) -> pd.Series:
-    """把某公司的股本对齐到交易日：只用 avail 日期之前已经可见的最近值（避免前视）。"""
+    """Align a company's share count to trading days, using only the latest value already visible by its avail date (no look-ahead)."""
     s = sh[sh["cik"] == cik]
     if s.empty:
         return pd.Series(float("nan"), index=index)

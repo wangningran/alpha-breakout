@@ -1,6 +1,6 @@
-"""拉全市场 SEC 公告索引（增发过滤、催化剂分类用），首次约 15 分钟，之后只补新公司。
+"""Fetch the market-wide SEC filing index (for the offering filter and catalyst classification); about 15 minutes the first time, then only new companies.
 
-用法：PYTHONPATH=src python scripts/fetch_filings.py [--refresh]
+Usage: PYTHONPATH=src python scripts/fetch_filings.py [--refresh]
 """
 from __future__ import annotations
 

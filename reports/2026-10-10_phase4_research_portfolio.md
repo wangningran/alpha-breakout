@@ -1,169 +1,169 @@
-# 第四阶段：13D/13G、基本面、出场、组合模拟、每日扫描
+# Phase 4: 13D/13G, fundamentals, exits, portfolio simulation, daily scan
 
-- 日期：2026-10-10
-- 股票池：和前几阶段相同，全行业小盘股 4956 支，2019-06 到 2026-10-09，不含退市股。
-- 新数据：SEC XBRL 季度基本面（frames API），76.6 万条，11505 家公司，缓存在 `data/cache/fundamentals.parquet`。
-  - 防前视：报告期末 + 75 天之后才使用。
-- 新配置：`configs/strategy_v3.yaml`（默认是本阶段选出的候选版本）。
-- 复现：
+- Date: 2026-10-10
+- Universe: same as earlier phases, 4956 small caps across all sectors, 2019-06 to 2026-10-09, excluding delisted stocks.
+- New data: SEC XBRL quarterly fundamentals (frames API), 766k records, 11505 companies, cached in `data/cache/fundamentals.parquet`.
+  - Look-ahead guard: used only after period end + 75 days.
+- New config: `configs/strategy_v3.yaml` (defaults to the candidate version chosen in this phase).
+- Reproduce:
   - `python scripts/fetch_fundamentals.py`
   - `python scripts/backtest.py --tag v3 --features`
   - `python scripts/portfolio.py --tag v3`
-- 判断口径：
-  - 同时看期望 R 和"单笔封顶 20R 后的期望"；
-  - 分 2019–23 / 2024–26 两段，两段都为正才算数；
-  - 最后用组合模拟和"直接持有 IWM"对比。
+- Evaluation standard:
+  - Look at both expectancy in R and "expectancy with each trade capped at 20R";
+  - Split into 2019-23 / 2024-26; it only counts if both periods are positive;
+  - Finally, compare the portfolio simulation against "just holding IWM".
 
-## 1. 结论
+## 1. Conclusions
 
-1. **13D/13G 机构入股：没有用**。按试仓日前后的大股东申报分组：
-   - 新 13D：两段都为负；
-   - 13D 修订：两段都为负或持平；
-   - 新 13G：2024–26 年为负。
+1. **13D/13G institutional stakes: not useful**. Grouped by large-holder filings around the probe date:
+   - New 13D: negative in both periods;
+   - 13D amendment: negative or flat in both periods;
+   - New 13G: negative in 2024-26.
 
-   "要求有 13D"作为过滤条件，结果比基准还差。上一阶段看到的 "13D +1.45R" 是异动当天的标签，换成试仓前的窗口后就消失了，说明那是小样本噪声。
-2. **营收高增长是目前唯一两段都有效的特征**：
-   - 最近季度营收同比 > 50% 的交易，封顶期望两段分别是 +0.10R、+0.12R，样本各约 300 笔；
-   - 营收下滑、没有营收、现金跑道 < 4 个季度的，两段都更差；
-   - 营收增速是否在加快，没有区分度；
-   - 门槛从 20% 提到 50%，效果随之变好（封顶期望 -0.006 → +0.037），有剂量效应。
-3. **出场**：
-   - ATR 跟踪止损比 20 日线更差，被正常波动扫出去的次数太多；
-   - "+3R 先卖一半、剩下用 50 日线跟踪"两段都略有改善，和基本面过滤叠加后效果更明显。
-4. **候选版本 v3**（v2 + 营收同比 ≥ 50% + 现金跑道 ≥ 4 季 + 3R 分批止盈）：
-   - 440 笔，期望 +0.34R，封顶期望 +0.14R，两段都为正（封顶 +0.055R、+0.26R）；
-   - 2024、2025、2026 三年都为正；
-   - 最大回撤 -126R，最长连亏 13 笔（基准是 -700R、56 笔）。
-5. **但它还不够好，不能实盘**：
-   - **仍依赖极端值**：收益最高的 4 笔（前 1%）贡献了 166R，比总和（149R）还多。去掉它们，平均每笔 -0.04R。
-   - **组合模拟跑不赢指数**：10 万美元账户，每笔风险 0.5%，最多同时持 10 支，20 个随机种子的中位数是年化 10.3%、最大回撤 -47%、夏普 0.53。同期直接持有 IWM 是年化 10.6%、最大回撤 -41%。
-   - **收益集中在 2020 年**：组合 2020 年 +95%，其余 6 年合计只有约 +2%。
-   - **参数是看过数据之后选的**（50% 门槛、4 季跑道、3R 止盈），有过拟合风险，需要用以后的新数据验证。
-6. **基准版本放进组合里亏得很多**：v3 不带基本面过滤和分批止盈时，组合 7 年 -38%，最大回撤 -85%。名额限制使得 75% 的信号做不了。直接追的对照组是 -58%。逐笔统计里那点正期望，放到真实账户里完全不存在。
-7. **每日扫描和研究日志已经可以用**。2026-10-09 的扫描：
-   - 新入池 2 支，其中包括 PRME；
-   - 观察中 251 支，其中基本面达标的 22 支；
-   - 当天没有可试仓的票。
+   Using "requires a 13D" as a filter does worse than the baseline. The "13D +1.45R" seen in the previous phase was a label on the surge day; once switched to the window before the probe it disappears, which shows it was small-sample noise.
+2. **High revenue growth is currently the only feature that works in both periods**:
+   - Trades with latest-quarter revenue YoY > 50% have capped expectancy of +0.10R and +0.12R in the two periods, about 300 trades each;
+   - Declining revenue, no revenue, and cash runway < 4 quarters are worse in both periods;
+   - Whether revenue growth is accelerating doesn't discriminate;
+   - Raising the threshold from 20% to 50% improves the effect accordingly (capped expectancy -0.006 -> +0.037), a dose-response effect.
+3. **Exits**:
+   - An ATR trailing stop is worse than the 20-day MA; it gets shaken out by normal volatility too often;
+   - "Sell half at +3R, trail the rest with the 50-day MA" improves both periods slightly, and the effect is more pronounced when combined with the fundamentals filter.
+4. **Candidate version v3** (v2 + revenue YoY >= 50% + cash runway >= 4 quarters + 3R partial take-profit):
+   - 440 trades, expectancy +0.34R, capped expectancy +0.14R, positive in both periods (capped +0.055R, +0.26R);
+   - Positive in each of 2024, 2025, and 2026;
+   - Max drawdown -126R, longest losing streak 13 trades (baseline: -700R, 56 trades).
+5. **But it's not good enough yet to trade live**:
+   - **Still depends on outliers**: the top 4 trades by return (top 1%) contributed 166R, more than the total (149R). Removing them, the average per trade is -0.04R.
+   - **The portfolio simulation doesn't beat the index**: $100k account, 0.5% risk per trade, at most 10 concurrent names; the median across 20 random seeds is 10.3% annualized, -47% max drawdown, Sharpe 0.53. Holding IWM over the same period gives 10.6% annualized, -41% max drawdown.
+   - **Returns are concentrated in 2020**: the portfolio made +95% in 2020, and only about +2% combined over the other 6 years.
+   - **The parameters were chosen after looking at the data** (50% threshold, 4-quarter runway, 3R take-profit), so there is overfitting risk; it needs validation on future data.
+6. **The baseline version loses a lot in a portfolio**: v3 without the fundamentals filter and partial take-profit gives -38% over 7 years in the portfolio, with -85% max drawdown. Slot limits mean 75% of signals can't be taken. The direct-chase control group is -58%. The small positive expectancy in the trade-by-trade statistics doesn't exist at all in a real account.
+7. **The daily scan and research journal are ready to use**. The 2026-10-09 scan:
+   - 2 new watchlist entries, including PRME;
+   - 251 names under watch, 22 of which meet the fundamentals criteria;
+   - No names ready to probe that day.
 
-## 2. 13D/13G 和基本面分组（基准规则，按试仓日的特征分组，单位：封顶 20R 的期望）
+## 2. 13D/13G and fundamentals groups (baseline rules, grouped by features on the probe date, unit: expectancy capped at 20R)
 
-| 分组 | 2019–23 笔数 | 2019–23 | 2024–26 笔数 | 2024–26 |
+| Group | 2019-23 trades | 2019-23 | 2024-26 trades | 2024-26 |
 | --- | --- | --- | --- | --- |
-| 无大股东申报 | 1623 | -0.06 | 1172 | -0.16 |
-| 新 13D | 97 | -0.16 | 63 | -0.33 |
-| 13D 修订 | 241 | -0.36 | 324 | -0.01 |
-| 新 13G | 356 | -0.10 | 490 | -0.35 |
-| 营收同比 < 0 | 752 | -0.03 | 581 | -0.36 |
-| 营收同比 0–20% | 424 | -0.42 | 435 | +0.04 |
-| 营收同比 20–50% | 299 | -0.00 | 224 | -0.24 |
-| **营收同比 > 50%** | 311 | **+0.10** | 264 | **+0.12** |
-| 没有营收数据 | 531 | -0.13 | 545 | -0.30 |
-| 现金跑道 < 2 季 | 271 | -0.13 | 313 | -0.30 |
-| 现金跑道 2–4 季 | 214 | -0.12 | 213 | -0.47 |
-| 现金跑道 4–8 季 | 298 | +0.36 | 352 | -0.09 |
-| 现金跑道 > 8 季 | 523 | -0.16 | 445 | -0.07 |
-| 盈利公司 | 753 | -0.18 | 524 | -0.05 |
+| No large-holder filing | 1623 | -0.06 | 1172 | -0.16 |
+| New 13D | 97 | -0.16 | 63 | -0.33 |
+| 13D amendment | 241 | -0.36 | 324 | -0.01 |
+| New 13G | 356 | -0.10 | 490 | -0.35 |
+| Revenue YoY < 0 | 752 | -0.03 | 581 | -0.36 |
+| Revenue YoY 0-20% | 424 | -0.42 | 435 | +0.04 |
+| Revenue YoY 20-50% | 299 | -0.00 | 224 | -0.24 |
+| **Revenue YoY > 50%** | 311 | **+0.10** | 264 | **+0.12** |
+| No revenue data | 531 | -0.13 | 545 | -0.30 |
+| Cash runway < 2 quarters | 271 | -0.13 | 313 | -0.30 |
+| Cash runway 2-4 quarters | 214 | -0.12 | 213 | -0.47 |
+| Cash runway 4-8 quarters | 298 | +0.36 | 352 | -0.09 |
+| Cash runway > 8 quarters | 523 | -0.16 | 445 | -0.07 |
+| Profitable companies | 753 | -0.18 | 524 | -0.05 |
 
-口径说明：
-- 大股东申报：异动前 30 天到试仓日之间的申报。
-- 营收：最近一个已披露季度的同比。
-- 现金跑道：（现金 + 短期投资）/ 季度亏损额。
-- 2024 年起 SEC 缩短了 13D/13G 的申报期限，表格名称也换了（SC 13D → SCHEDULE 13D），所以前后两段的申报数量不完全可比。
+Definitions:
+- Large-holder filings: filings between 30 days before the surge and the probe date.
+- Revenue: YoY for the most recent disclosed quarter.
+- Cash runway: (cash + short-term investments) / quarterly loss.
+- Starting in 2024 the SEC shortened the 13D/13G filing deadlines and renamed the forms (SC 13D -> SCHEDULE 13D), so filing counts in the two periods are not fully comparable.
 
-## 3. 变体对比（每次在 v3 基准上改一项或一组）
+## 3. Variant comparison (each changes one item or one group on top of the v3 baseline)
 
-| 版本 | 交易数 | 胜率 | 期望(R) | 封顶20R | 19–23 期望 | 19–23 封顶 | 24–26 期望 | 24–26 封顶 | 最大回撤(R) | 最长连亏 |
+| Version | Trades | Win rate | Expectancy (R) | Capped 20R | 19-23 expectancy | 19-23 capped | 24-26 expectancy | 24-26 capped | Max drawdown (R) | Longest losing streak |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| v3_base（= v2） | 4390 | 25% | +0.035 | -0.141 | +0.184 | -0.101 | -0.134 | -0.186 | -700 | 56 |
-| 营收同比 ≥ 20% | 1161 | 25% | +0.109 | -0.006 | +0.143 | +0.011 | +0.066 | -0.027 | -213 | 20 |
-| 营收同比 ≥ 50% | 612 | 23% | +0.207 | +0.037 | +0.237 | +0.034 | +0.172 | +0.040 | -157 | 22 |
-| 现金跑道 ≥ 4 季 | 2966 | 26% | +0.105 | -0.088 | +0.246 | -0.084 | -0.062 | -0.093 | -416 | 65 |
-| 营收 ≥ 50% + 跑道 ≥ 4 季 | 448 | 24% | +0.233 | +0.063 | +0.218 | +0.018 | +0.254 | +0.126 | -138 | 18 |
-| 要求有 13D | 831 | 23% | -0.017 | -0.150 | -0.080 | -0.236 | +0.038 | -0.076 | -146 | 43 |
-| ATR×3 跟踪 | 4611 | 23% | +0.078 | -0.165 | +0.150 | -0.120 | -0.003 | -0.216 | -719 | 100 |
-| ATR×4 跟踪 | 4450 | 22% | +0.093 | -0.233 | +0.251 | -0.155 | -0.086 | -0.320 | -922 | 105 |
-| 3R 卖一半 + 50 日线 | 4349 | 26% | +0.005 | -0.091 | +0.098 | -0.034 | -0.101 | -0.156 | -700 | 55 |
-| 3R 卖一半 + ATR×3 | 4604 | 25% | +0.015 | -0.054 | +0.063 | -0.021 | -0.040 | -0.092 | -643 | 42 |
-| 营收 ≥ 50% + 3R 分批 | 604 | 24% | +0.202 | +0.047 | +0.303 | +0.069 | +0.082 | +0.020 | -154 | 16 |
-| **v3 候选：营收 ≥ 50% + 跑道 ≥ 4 季 + 3R 分批** | 440 | 25% | **+0.340** | **+0.139** | +0.351 | +0.055 | +0.324 | +0.260 | -126 | 13 |
+| v3_base (= v2) | 4390 | 25% | +0.035 | -0.141 | +0.184 | -0.101 | -0.134 | -0.186 | -700 | 56 |
+| Revenue YoY >= 20% | 1161 | 25% | +0.109 | -0.006 | +0.143 | +0.011 | +0.066 | -0.027 | -213 | 20 |
+| Revenue YoY >= 50% | 612 | 23% | +0.207 | +0.037 | +0.237 | +0.034 | +0.172 | +0.040 | -157 | 22 |
+| Cash runway >= 4 quarters | 2966 | 26% | +0.105 | -0.088 | +0.246 | -0.084 | -0.062 | -0.093 | -416 | 65 |
+| Revenue >= 50% + runway >= 4 quarters | 448 | 24% | +0.233 | +0.063 | +0.218 | +0.018 | +0.254 | +0.126 | -138 | 18 |
+| Requires a 13D | 831 | 23% | -0.017 | -0.150 | -0.080 | -0.236 | +0.038 | -0.076 | -146 | 43 |
+| ATRx3 trailing | 4611 | 23% | +0.078 | -0.165 | +0.150 | -0.120 | -0.003 | -0.216 | -719 | 100 |
+| ATRx4 trailing | 4450 | 22% | +0.093 | -0.233 | +0.251 | -0.155 | -0.086 | -0.320 | -922 | 105 |
+| Sell half at 3R + 50-day MA | 4349 | 26% | +0.005 | -0.091 | +0.098 | -0.034 | -0.101 | -0.156 | -700 | 55 |
+| Sell half at 3R + ATRx3 | 4604 | 25% | +0.015 | -0.054 | +0.063 | -0.021 | -0.040 | -0.092 | -643 | 42 |
+| Revenue >= 50% + 3R partial | 604 | 24% | +0.202 | +0.047 | +0.303 | +0.069 | +0.082 | +0.020 | -154 | 16 |
+| **v3 candidate: revenue >= 50% + runway >= 4 quarters + 3R partial** | 440 | 25% | **+0.340** | **+0.139** | +0.351 | +0.055 | +0.324 | +0.260 | -126 | 13 |
 
-**v3 候选分年**：
+**v3 candidate by year**:
 
-| 年份 | 交易数 | 胜率 | 期望(R) | 封顶20R |
+| Year | Trades | Win rate | Expectancy (R) | Capped 20R |
 | --- | --- | --- | --- | --- |
-| 2019（6 月起） | 5 | 20% | +0.25 | +0.25 |
+| 2019 (from June) | 5 | 20% | +0.25 | +0.25 |
 | 2020 | 56 | 38% | +3.19 | +1.83 |
 | 2021 | 59 | 24% | -0.02 | -0.02 |
 | 2022 | 68 | 16% | -1.06 | -1.06 |
 | 2023 | 70 | 29% | -0.23 | -0.23 |
 | 2024 | 59 | 22% | +0.55 | +0.54 |
 | 2025 | 72 | 25% | +0.09 | +0.09 |
-| 2026（至 10-09） | 51 | 24% | +0.39 | +0.18 |
+| 2026 (through 10-09) | 51 | 24% | +0.39 | +0.18 |
 
-收益最高的几笔：GRWG 2020（+51R）、MGNX 2020（+48R）、MARA 2020（+36R）、AAOI 2026（+31R）、RKLB 2024（+21R）。
+Top trades by return: GRWG 2020 (+51R), MGNX 2020 (+48R), MARA 2020 (+36R), AAOI 2026 (+31R), RKLB 2024 (+21R).
 
-## 4. 组合模拟
+## 4. Portfolio simulation
 
-规则（`src/alpha_breakout/portfolio.py`）：
-- 初始资金 10 万美元，每笔试仓承担账户 0.5% 的风险（= 1R）；
-- 单支满仓市值不超过账户 20%；
-- 最多同时持仓 10 支，每天最多开 3 笔新试仓；
-- 同一天信号多于名额时随机挑选，跑 20 个随机种子；
-- 每天按收盘价盯市，成交含 0.5% 滑点。
+Rules (`src/alpha_breakout/portfolio.py`):
+- Starting capital $100k; each probe carries 0.5% of account risk (= 1R);
+- A single name's full-position market value is capped at 20% of the account;
+- At most 10 concurrent positions, at most 3 new probes per day;
+- When a day has more signals than slots, pick at random; run 20 random seeds;
+- Mark to market daily at the close; fills include 0.5% slippage.
 
-| 版本 | 总收益（中位数） | 年化 | 最大回撤 | 夏普 | 做了 / 没做的信号 |
+| Version | Total return (median) | Annualized | Max drawdown | Sharpe | Signals taken / not taken |
 | --- | --- | --- | --- | --- | --- |
-| v3_base 分批 | -38% | -6.5% | -85% | -0.02 | 1077 / 3313 |
-| v3_base 直接追（满仓风险 0.5%） | -58% | -11.1% | -67% | -0.27 | 1678 / 10114 |
-| 营收 ≥ 50% + 3R 分批 | +82% | +8.8% | -51% | 0.45 | 475 / 129 |
-| **v3 候选** | **+100%** | **+10.3%** | **-47%** | **0.53** | 382 / 58 |
-| v3 候选，每笔 0.25%、最多 20 支 | +41% | +5.0% | -33% | 0.44 | 424 / 16 |
-| 对照：持有 IWM | +109% | +10.6% | -41% | — | — |
+| v3_base scaled | -38% | -6.5% | -85% | -0.02 | 1077 / 3313 |
+| v3_base direct chase (full-position risk 0.5%) | -58% | -11.1% | -67% | -0.27 | 1678 / 10114 |
+| Revenue >= 50% + 3R partial | +82% | +8.8% | -51% | 0.45 | 475 / 129 |
+| **v3 candidate** | **+100%** | **+10.3%** | **-47%** | **0.53** | 382 / 58 |
+| v3 candidate, 0.25% per trade, at most 20 names | +41% | +5.0% | -33% | 0.44 | 424 / 16 |
+| Control: hold IWM | +109% | +10.6% | -41% | - | - |
 
-**v3 候选组合分年收益（中位数）**：
+**v3 candidate portfolio returns by year (median)**:
 
 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | -3.5% | +95% | +28% | -28% | +2% | +16% | -9% | +8% |
 
-组合 2021 年 +28%，而逐笔统计的 2021 年是 -0.02R。差异来自 2020 年底入场、2021 年才卖出的大赢家（比如 MARA），它们在组合里按年度盯市计入 2021 年。
+The portfolio made +28% in 2021, while the trade-by-trade statistics for 2021 are -0.02R. The difference comes from big winners entered in late 2020 and sold only in 2021 (e.g. MARA), which the portfolio marks to market by year and counts in 2021.
 
-**同期 IWM 分年**：
+**IWM by year over the same period**:
 
 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | +14% | +20% | +15% | -21% | +17% | +11% | +13% | +14% |
 
-## 5. 每日扫描和研究日志
+## 5. Daily scan and research journal
 
-- `python scripts/daily_scan.py`：收盘后运行，约 15 分钟（加 `--no-update` 跳过行情更新）。依次做这几件事：
-  1. 增量更新全市场行情；
-  2. 跑一遍状态机，得到每支票当前的状态；
-  3. 对观察名单里的公司刷新 SEC 公告；
-  4. 输出 `reports/daily/<日期>.md`。
-- 报告分四类：
-  - 可试仓：附规则止损、建议股数、催化剂、13D/13G、营收同比、现金跑道、近期公告；
-  - 持仓管理：规则下的假想持仓；
-  - 新入池；
-  - 观察中：标明基本面是否达标，达标的排在前面。
-- "可试仓"的票会自动追加到 `journal/research_log.csv`。你填 decision（做 / 不做）和 reason。
-- `python scripts/evaluate_journal.py`：按"做 / 不做"分组，统计之后 5 / 20 / 60 天的实际表现，用来判断人工研究有没有增益。
-- 2026-10-09 的扫描结果见 `reports/daily/2026-10-09.md`。
+- `python scripts/daily_scan.py`: run after the close, about 15 minutes (add `--no-update` to skip the price update). It does the following in order:
+  1. Incrementally update full-market prices;
+  2. Run the state machine once to get each ticker's current state;
+  3. Refresh SEC filings for companies on the watchlist;
+  4. Output `reports/daily/<date>.md`.
+- The report has four sections:
+  - Ready to probe: with the rule stop, suggested share count, catalyst, 13D/13G, revenue YoY, cash runway, and recent filings;
+  - Position management: hypothetical positions under the rules;
+  - New watchlist entries;
+  - Under watch: flagged by whether fundamentals meet the criteria, with qualifying names listed first.
+- Names that are "ready to probe" are automatically appended to `journal/research_log.csv`. You fill in decision (take / pass) and reason.
+- `python scripts/evaluate_journal.py`: groups by "take / pass" and computes actual performance over the following 5 / 20 / 60 days, to judge whether manual research adds value.
+- See `reports/daily/2026-10-09.md` for the 2026-10-09 scan results.
 
-## 6. 局限
+## 6. Limitations
 
-- 幸存者偏差：股票池只有现在还在交易的公司，结果偏乐观，对营收高增长这类"活下来的公司"可能尤其偏乐观。
-- 基本面用 XBRL frames：
-  - 只覆盖使用 us-gaap 标签的公司，外国公司（IFRS）基本不在里面；
-  - 第四季度单季数据经常缺失，这时用的是更早的季度；
-  - 亏损额用净利润近似烧钱速度，含非现金项目。
-- 候选版本的几个参数是看过数据后选的，只有 440 笔交易，需要用未来的新数据验证（每日扫描和研究日志就是做这个的）。
-- 组合模拟里同一天信号多时随机挑选。实际中你会人工挑，这正是研究日志要评估的部分。
+- Survivorship bias: the universe only contains companies still trading today, so results are biased optimistic, possibly especially so for "survivor" traits like high revenue growth.
+- Fundamentals come from XBRL frames:
+  - They only cover companies using us-gaap tags; foreign companies (IFRS) are mostly absent;
+  - Fourth-quarter single-quarter data is often missing, in which case an earlier quarter is used;
+  - The loss figure uses net income to approximate cash burn, including non-cash items.
+- Several parameters of the candidate version were chosen after looking at the data, with only 440 trades; it needs validation on future data (which is what the daily scan and research journal are for).
+- In the portfolio simulation, signals are picked at random when a day has many. In practice you would pick manually, which is exactly the part the research journal is meant to evaluate.
 
-## 7. 下一步建议
+## 7. Suggested next steps
 
-1. **用每日扫描做前瞻验证（最重要）**：从现在开始每天跑，记研究日志，不下真钱或只下极小仓位。三个月后用 `evaluate_journal.py` 看两件事：候选规则在样本外是否仍为正；你的人工判断是否带来增益。
-2. **找更多两段都有效的基本面特征**：营收高增长有效，说明"业务真在变好"这个方向是对的。可以继续看毛利率改善、营收绝对规模（剔除基数太小的"高增长"）、盈利拐点（亏损收窄）。
-3. **相对强度排序**：同一天多个信号时，按相对 IWM 和行业的强度排序，而不是随机挑。组合模拟里有 13% 的信号因为名额不够被跳过。
-4. **和 IWM 对比**：策略要有意义，必须在风险调整后跑赢指数。可以考虑"平时持有 IWM，出现信号时用一部分资金做试仓"的混合方案，看组合回撤和收益能不能同时改善。
-5. （长期）补上内部人买入（Form 4），以及含退市股的数据源。
+1. **Use the daily scan for forward validation (most important)**: run it every day starting now and keep the research journal, with no real money or only very small positions. After three months use `evaluate_journal.py` to check two things: whether the candidate rule is still positive out of sample, and whether your manual judgment adds value.
+2. **Look for more fundamental features that work in both periods**: high revenue growth works, which shows the "business is really improving" direction is right. Next, look at gross margin improvement, absolute revenue scale (to drop "high growth" off a tiny base), and earnings inflection (narrowing losses).
+3. **Relative-strength ranking**: when several signals arrive on the same day, rank by strength relative to IWM and the sector instead of picking at random. In the portfolio simulation 13% of signals were skipped for lack of slots.
+4. **Comparison with IWM**: for the strategy to be meaningful it must beat the index on a risk-adjusted basis. Consider a hybrid of "hold IWM normally, and use part of the capital to probe when signals appear", and see whether portfolio drawdown and return can both improve.
+5. (Long term) Add insider buying (Form 4), and a data source that includes delisted stocks.

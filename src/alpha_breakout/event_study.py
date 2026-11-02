@@ -1,12 +1,12 @@
-"""事件复盘：找大涨段、定起涨首日（day 0），输出 day -60 ~ day 0 的信号表现。
+"""Event review: find big rallies, locate the first day of the move (day 0), and report signal behavior from day -60 to day 0.
 
-大涨段识别：
-1. 在收盘价上做 zigzag（反转阈值 `reversal`），得到交替的低点 / 高点；
-2. 低点→高点涨幅 ≥ `min_gain` 的上升段视为“大涨段”；
-3. day 0 = 段内第一根“点火 K 线”：单日涨幅 ≥ `ignite_ret` 且量比 ≥ `ignite_vol`，
-   并且从它的收盘到段高点还有 ≥ `min_gain_after` 的空间（排除段末尾的追涨日）；
-   找不到就退化为第一次收盘站上低点 ×(1+`fallback_gain`) 的那天。
-day 0 是机械规则给的近似，样本配置里可以手工指定起涨日覆盖它。
+Rally detection:
+1. run a zigzag on closes (reversal threshold `reversal`) to get alternating troughs / peaks;
+2. an up leg with a trough-to-peak gain >= `min_gain` counts as a "rally";
+3. day 0 = the first "ignition bar" in the leg: one-day gain >= `ignite_ret` and volume ratio >= `ignite_vol`,
+   with at least `min_gain_after` left from its close to the leg peak (excludes chase days near the end of the leg);
+   if there is none, fall back to the first close at or above trough x (1+`fallback_gain`).
+day 0 is an approximation from mechanical rules; the sample config can override it with a manual start date.
 """
 from __future__ import annotations
 
@@ -18,17 +18,17 @@ import pandas as pd
 
 @dataclass
 class RallyParams:
-    reversal: float = 0.25       # zigzag 反转阈值
-    min_gain: float = 0.60       # 低点到高点至少 +60%
-    ignite_ret: float = 0.08     # 点火日单日涨幅
-    ignite_vol: float = 2.0      # 点火日量比（对 50 日均量）
-    min_gain_after: float = 0.40  # 点火日收盘到段高点至少还有 +40%
+    reversal: float = 0.25       # zigzag reversal threshold
+    min_gain: float = 0.60       # at least +60% from trough to peak
+    ignite_ret: float = 0.08     # one-day gain on the ignition day
+    ignite_vol: float = 2.0      # ignition-day volume ratio (vs 50-day average volume)
+    min_gain_after: float = 0.40  # at least +40% left from the ignition-day close to the leg peak
     fallback_gain: float = 0.15
-    min_history: int = 120       # 低点之前至少要有这么多交易日，否则标记 short_history
+    min_history: int = 120       # minimum trading days before the trough, otherwise flagged short_history
 
 
 def zigzag(close: pd.Series, reversal: float) -> list[tuple[pd.Timestamp, float, str]]:
-    """返回 [(日期, 价格, 'L'/'H'), ...]，交替出现。"""
+    """Return [(date, price, 'L'/'H'), ...], alternating."""
     pivots = []
     trend = None
     ext_i, ext_p = close.index[0], close.iloc[0]
@@ -101,7 +101,7 @@ SNAPSHOT_COLS = ["close", "ret_1d", "base_range_60", "base_range_90", "base_rang
 
 
 def event_window(features: pd.DataFrame, day0, pre: int = 60, post: int = 0) -> pd.DataFrame:
-    """以 day0 为 0 对齐，截取 [-pre, +post] 的特征行，加一列 rel_day。"""
+    """Align on day0 = 0, take the feature rows in [-pre, +post], and add a rel_day column."""
     idx = features.index.get_loc(pd.Timestamp(day0))
     lo, hi = max(0, idx - pre), min(len(features) - 1, idx + post)
     w = features.iloc[lo: hi + 1].copy()
@@ -110,7 +110,7 @@ def event_window(features: pd.DataFrame, day0, pre: int = 60, post: int = 0) -> 
 
 
 def window_summary(w: pd.DataFrame) -> dict:
-    """day -60~-1 的横盘 / 波动 / 量能概况 + day 0 当天的数值。"""
+    """Consolidation / volatility / volume profile for day -60..-1, plus the day 0 values."""
     pre = w[w["rel_day"] < 0]
     d0 = w[w["rel_day"] == 0].iloc[0]
     return {

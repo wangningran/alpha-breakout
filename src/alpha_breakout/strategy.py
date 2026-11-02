@@ -1,24 +1,24 @@
-"""策略：异动 → 观察 → 试仓 → 加仓（逐支票的事件回测，也用于每日扫描）。
+"""Strategy: surge -> watch -> probe -> add (per-ticker event backtest, also used by the daily scan).
 
-状态机（每支票独立，收盘判断、次日开盘执行）：
-  idle  --异动-->  watch  --观察期满 + 创异动以来新高-->  probe(1/3)  --浮盈 1R-->  full
-  watch：收盘跌回异动前价格 → 作废；超过 max_days → 过期
-  probe：触及止损 → 出局；probe_max_days 内没到 1R → 出局（验证失败）
-         出局后如果异动还没作废 / 过期，回到 watch 等下一次新高（最多 max_attempts 次）
-  full ：触及止损，或跟踪出场（均线 / ATR），或持有满 max_hold_days → 全部出场
-         可选分批止盈：收盘浮盈达到 partial_r 倍 R，次日开盘卖出 partial_frac，剩余换宽松跟踪
+State machine (independent per ticker; decided at the close, executed at the next open):
+  idle  --surge-->  watch  --watch period over + new high since the surge-->  probe(1/3)  --open profit 1R-->  full
+  watch: close falls back to the pre-surge price -> invalidated; beyond max_days -> expired
+  probe: stop hit -> exit; no 1R within probe_max_days -> exit (failed confirmation)
+         after an exit, if the surge is not yet invalidated / expired, return to watch for the next new high (up to max_attempts)
+  full : stop hit, trailing exit (MA / ATR), or held for max_hold_days -> exit everything
+         optional partial take-profit: once the close is up partial_r x R, sell partial_frac at the next open and trail the rest more loosely
 
-mode=immediate 是对照组：异动次日开盘直接满仓，止损 / 跟踪规则相同，没有观察和试仓。
+mode=immediate is the control group: full position at the open after the surge, same stop / trailing rules, no watch or probe.
 
-v2 起的可选模块（都在配置里开关）：
-  clean   ：数据清洗，异动前就要有流动性、上市时间够长、没有停滞报价
-  offering：增发过滤，异动前 lookback_days 天到异动当天出现增发公告 → 不入池；
-            during_watch / exit_on_offering 控制观察期和持仓中的处理
-  catalyst：给每笔交易打上异动前后的公告类别标签，可按类别排除
-  entry_filter：外部传入的试仓前检查（13D/13G、基本面等），返回 False 就跳过这次信号
+Optional modules from v2 on (each toggled in the config):
+  clean   : data cleaning; requires liquidity before the surge, enough listing history, no stale quotes
+  offering: offering filter; an offering filing from lookback_days before the surge through the surge day -> not admitted;
+            during_watch / exit_on_offering control the handling during the watch period and while holding
+  catalyst: tags each trade with the category of filings around the surge; categories can be excluded
+  entry_filter: external pre-probe check (13D/13G, fundamentals, etc.); returning False skips this signal
 
-每笔交易用 legs 记录逐笔成交：(日期, 数量, 价格)，数量以“目标满仓 = 1 单位资金”计，
-买入为正、卖出为负。组合模拟按 legs 把交易放大到真实资金。
+Each trade records its fills in legs: (date, qty, price), with qty measured so that "target full position = 1 unit of capital",
+positive for buys, negative for sells. The portfolio simulation scales trades to real capital using legs.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class Trade:
     exit_price: float = np.nan
     exit_reason: str = ""
     days_surge_to_signal: int = 0
-    pullback_before_signal: float = 0.0     # 入场前距异动以来最高收盘的最大回撤
+    pullback_before_signal: float = 0.0     # max drawdown from the highest close since the surge, before entry
     surge_gain: float = 0.0
     mcap_at_surge: float = np.nan
     catalyst: str = ""
@@ -103,10 +103,10 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                filings: pd.DataFrame | None = None,
                entry_filter: Callable[[pd.Timestamp, "Trade"], bool] | None = None,
                state_out: dict | None = None) -> list[Trade]:
-    """返回已完成（和期末未平）的交易。
+    """Return completed trades (and those still open at period end).
 
-    stats：累加漏斗计数（surges / invalidated / expired / diluted / catalyst_excluded / filtered）。
-    state_out：传入 dict 时，写入最后一天收盘后的状态，供每日扫描使用。
+    stats: accumulates funnel counts (surges / invalidated / expired / diluted / catalyst_excluded / filtered).
+    state_out: if a dict is passed, the state after the last day's close is written into it for the daily scan.
     """
     from .filings import catalyst_label
 
@@ -135,7 +135,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
     clean_on = bool((cfg.get("clean") or {}).get("enabled"))
     min_dv = cfg["universe"]["min_dollar_volume"]
 
-    # 增发公告：映射到交易日（周末 / 节假日申报的算下一个交易日）
+    # Offering filings: mapped to trading days (filed on a weekend / holiday counts as the next trading day)
     off_cfg = (cfg.get("filters") or {}).get("offering") or {}
     off_on = bool(off_cfg.get("enabled")) and filings is not None
     off_flag = np.zeros(len(idx), dtype=bool)
@@ -161,9 +161,9 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
     hi = 0.0
     max_dd = 0.0
     attempt = 0
-    pending = None          # ("probe"/"add"/"partial"/"exit", reason) 次日开盘执行
+    pending = None          # ("probe"/"add"/"partial"/"exit", reason) executed at the next open
     stop = np.nan
-    held_qty = 0.0          # 当前持仓数量（单位：目标满仓 = 1 单位资金）
+    held_qty = 0.0          # current position size (unit: target full position = 1 unit of capital)
     peak_close = 0.0
     partial_done = False
     n = len(idx)
@@ -195,7 +195,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
         if idx[i] > end:
             break
         last_i = i
-        # ---- 先执行昨天收盘定下的动作（开盘价成交）----
+        # ---- First execute the action decided at yesterday's close (filled at the open) ----
         if pending is not None:
             act, why = pending
             pending = None
@@ -203,7 +203,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                 tr.entry_date, tr.entry = idx[i], o[i]
                 tr.stop0 = max(low_n[i - 1] if not np.isnan(low_n[i - 1]) else 0.0,
                                o[i] * (1 - p["max_stop_pct"]))
-                if tr.stop0 >= o[i]:  # 跳空低开到止损下方
+                if tr.stop0 >= o[i]:  # gapped open below the stop
                     tr.stop0 = o[i] * (1 - p["max_stop_pct"])
                 stop = tr.stop0
                 peak_close, partial_done = o[i], False
@@ -228,19 +228,19 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
             elif act == "exit":
                 close_trade(i, o[i], why)
 
-        # ---- 持仓中：止损（盘中）----
+        # ---- In position: stop (intraday) ----
         if state in ("probe", "full") and l[i] <= stop:
             close_trade(i, min(o[i], stop), "stop")
             continue
 
-        if i + 1 >= n and state_out is None:  # 回测：最后一天没有“次日开盘”；扫描时仍要做收盘判断
+        if i + 1 >= n and state_out is None:  # backtest: no "next open" on the last day; the scan still needs the close decision
             continue
 
-        # ---- 收盘判断 ----
+        # ---- Close decision ----
         if state == "idle":
             if idx[i] >= start and kind[i] and elig[i]:
                 stats["surges"] = stats.get("surges", 0) + 1
-                if offering_before(i):  # 异动前后已经在发股
+                if offering_before(i):  # already issuing shares around the surge
                     stats["diluted"] = stats.get("diluted", 0) + 1
                     continue
                 if cat_excl and filings is not None and catalyst_label(filings, idx[i]) in cat_excl:
@@ -268,7 +268,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
                 stats["expired"] = stats.get("expired", 0) + (attempt == 1)
                 state, tr = "idle", None
                 continue
-            if off_on and off_cfg.get("during_watch", True) and off_flag[i]:  # 观察期内出现增发公告
+            if off_on and off_cfg.get("during_watch", True) and off_flag[i]:  # offering filing during the watch period
                 stats["diluted"] = stats.get("diluted", 0) + (attempt == 1)
                 state, tr = "idle", None
                 continue
@@ -337,7 +337,7 @@ def run_ticker(ticker: str, df: pd.DataFrame, shares: pd.Series, cfg: dict,
 
 
 def market_filter(bench: pd.DataFrame, cfg: dict) -> pd.Series | None:
-    """大盘过滤：基准收盘在 N 日均线上方才允许开新仓。cfg["market"]["enabled"]=false 时返回 None。"""
+    """Market filter: new positions only while the benchmark closes above its N-day MA. Returns None when cfg["market"]["enabled"]=false."""
     m = cfg.get("market") or {}
     if not m.get("enabled"):
         return None
@@ -346,8 +346,8 @@ def market_filter(bench: pd.DataFrame, cfg: dict) -> pd.Series | None:
 
 
 def trade_pnl(t: Trade, cfg: dict, mode: str = "staged") -> dict:
-    """收益按“目标满仓 = 1”计（含滑点）。r_multiple 以入场时承担的风险为 1R
-    （分批模式下 = 试仓那部分的风险，对照组 = 满仓风险）。"""
+    """Returns measured with "target full position = 1" (slippage included). r_multiple uses the risk taken at entry as 1R
+    (staged mode = risk of the probe portion; control group = full position risk)."""
     s = cfg["position"]["slippage"]
     pnl = 0.0
     for _, q, px in t.legs:

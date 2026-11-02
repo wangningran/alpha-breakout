@@ -1,10 +1,10 @@
-"""建全市场股票池并批量下载日线（首次约 15 分钟，之后只补缺）。
+"""Build the market-wide stock universe and bulk-download daily bars (about 15 minutes the first time, then only fills gaps).
 
-用法：
+Usage:
     PYTHONPATH=src python scripts/build_universe.py [--refresh] [--start 2018-06-01]
 
-输出：data/cache/universe.csv（ticker, cik, name, exchange），行情在 data/cache/prices/。
-只保留有 SEC 股本数据的公司（否则无法估算市值，主要是外国私人发行人）。
+Output: data/cache/universe.csv (ticker, cik, name, exchange); prices go to data/cache/prices/.
+Only companies with SEC share count data are kept (otherwise market cap cannot be estimated; mostly foreign private issuers).
 """
 from __future__ import annotations
 

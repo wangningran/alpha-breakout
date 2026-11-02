@@ -1,24 +1,24 @@
-# 第一阶段：PRME / SDGR 事件复盘 + v0 扫描器检查
+# Phase 1: PRME / SDGR event review + v0 scanner check
 
-- 日期：2026-10-10
-- 数据：Yahoo Finance 日线（yfinance），截止 2026-10-09 收盘；PRME 自 2022-10-20 上市起，SDGR 自 2020-02-06 上市起；基准 XBI。
-- 公告：SEC EDGAR submissions API（只看了表格类型和 8-K item 编号，没读正文）。
-- 复现：`PYTHONPATH=src python scripts/event_study.py --tag v0`（v0b 加 `--config configs/scanner_v0b.yaml --tag v0b`），明细在 `reports/data/`。
+- Date: 2026-10-10
+- Data: Yahoo Finance daily bars (yfinance), through the 2026-10-09 close; PRME from its 2022-10-20 listing, SDGR from its 2020-02-06 listing; benchmark XBI.
+- Filings: SEC EDGAR submissions API (only form types and 8-K item numbers were checked; the filing text was not read).
+- Reproduce: `PYTHONPATH=src python scripts/event_study.py --tag v0` (for v0b add `--config configs/scanner_v0b.yaml --tag v0b`); details are in `reports/data/`.
 
-## 1. 结论
+## 1. Conclusions
 
-1. **v0 规则在两支票全部历史上一次都没触发**（PRME 996 个交易日、SDGR 1599 个交易日，0 次）。
-2. 卡住的主要是「突破前一天 20 日波动率处于低位」。全历史里同时满足「突破 + 3 倍量 + 收在上 1/3」的日子只有 6 天，这 6 天前一天的波动率分位都在 0.54–1.00，原因是放量突破之前几天股价已经先动起来了。
-3. 大多数「起涨首日」不是平台突破，而是从下跌趋势的低点反转：10 个有效事件中，day 0 满足突破条件的只有 1 个（SDGR 2020-11-23），day 0 前 20 日跑赢 XBI 的只有 5 个，day -1 时近 20 日跑输 XBI 的有 7 个。v0 是“确认型”规则，天然抓不到起涨第一天，最多抓到第二段。
-4. 只改一处（低波动条件改为「过去 60 日内出现过」，即 v0b），会出 4 个信号：SDGR 2023-05-22（到段高点 +42%）、SDGR 2025-01-22（40 日内最多 +7%，最大回撤 -18%，失败）、SDGR 2026-09-15（之后 18 个交易日最多 +40%，事件还没走完）、**PRME 2026-10-07（就是这周，结果未知）**。样本太少，不能下结论。
-5. 起涨前的共性：10 个有效事件中有 8 个在 day -60~0 之间出现过 20 日波动率分位 ≤ 0.35，「先收敛」这一条站得住。day 0 当天量比 ≥ 3 的只有 3 个，≥ 2 的有 6 个，3 倍量门槛偏严。
-6. SDGR 有 3 次起涨首日紧跟财报 8-K（item 2.02）：2023-03-01、2023-11-02、2026-08-06。2020-11-23 当天有一份 item 1.01（重大协议）8-K。所有事件 day -30~+5 内都没有 S-3 / 424B5。
+1. **The v0 rule never fired once over the full history of either ticker** (PRME 996 trading days, SDGR 1599 trading days, 0 signals).
+2. The main blocker is "20-day volatility is low on the day before the breakout". Across the full history, only 6 days satisfied "breakout + 3x volume + close in the top 1/3" at the same time, and on the day before each of those 6 days the volatility percentile was between 0.54 and 1.00, because the stock had already started moving in the days before the high-volume breakout.
+3. Most "ignition days" are not base breakouts but reversals off a downtrend low: of the 10 valid events, only 1 satisfied the breakout condition on day 0 (SDGR 2020-11-23), only 5 had outperformed XBI over the 20 days before day 0, and 7 had underperformed XBI over the last 20 days as of day -1. v0 is a "confirmation" rule; by design it cannot catch the first day of a move, at best the second leg.
+4. Changing just one thing (the low-volatility condition becomes "occurred within the past 60 days", i.e. v0b) produces 4 signals: SDGR 2023-05-22 (+42% to the leg high), SDGR 2025-01-22 (at most +7% within 40 days, max drawdown -18%, a failure), SDGR 2026-09-15 (at most +40% over the following 18 trading days, event still in progress), **PRME 2026-10-07 (this very week, outcome unknown)**. The sample is too small to draw conclusions.
+5. Common traits before ignition: 8 of the 10 valid events had a 20-day volatility percentile <= 0.35 somewhere between day -60 and day 0, so the "contract first" condition holds up. Only 3 had a day-0 volume ratio >= 3, and 6 had >= 2, so the 3x volume threshold is on the strict side.
+6. SDGR had 3 ignition days that came right after an earnings 8-K (item 2.02): 2023-03-01, 2023-11-02, 2026-08-06. On 2020-11-23 there was an item 1.01 (material agreement) 8-K that same day. No event had an S-3 / 424B5 within day -30 to +5.
 
-## 2. 大涨段与起涨首日
+## 2. Big up-legs and ignition days
 
-识别方法见 `src/alpha_breakout/event_study.py`：在收盘价上跑 25% zigzag，取低点到高点涨幅 ≥ 60% 的上升段。day 0 取段内第一根「涨幅 ≥ 8% 且量比 ≥ 2、之后到段高点还有 ≥ 40% 空间」的 K 线；如果没有这样的 K 线，就取第一次收盘站上低点 +15% 的那天（表中标 fallback）。这是机械近似，手工起涨日可以写进 `configs/samples.yaml` 的 `manual_day0`。
+The detection method is in `src/alpha_breakout/event_study.py`: run a 25% zigzag on closing prices and take up-legs with a low-to-high gain >= 60%. Day 0 is the first bar in the leg with "gain >= 8%, volume ratio >= 2, and >= 40% of room left to the leg high"; if there is no such bar, it is the first day the close is above low +15% (marked fallback in the table). This is a mechanical approximation; hand-picked ignition days can be written into `manual_day0` in `configs/samples.yaml`.
 
-| 代码 | 低点 | day 0 | 规则 | 高点 | 低→高 | day0收→高 | day0→高(交易日) |
+| Ticker | Low | day 0 | Rule | High | Low->High | day0 close->High | day0->High (trading days) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | PRME | 2024-04-25 | 2024-05-01 | fallback | 2024-05-21 | +87% | +52% | 14 |
 | PRME | 2025-05-21 | **2025-06-06** | ignition | 2025-07-14 | +312% | +184% | 24 |
@@ -33,82 +33,81 @@
 | SDGR | 2023-10-30 | **2023-11-02** | ignition | 2023-12-28 | +72% | +49% | 38 |
 | SDGR | 2026-03-30 | **2026-08-06** | ignition | 2026-10-05* | +195% | +83% | 41 |
 
-\* SDGR 2026 这段截至 2026-10-09 的高点，未必是最终高点。SDGR 2020 年的两段离上市不到 120 个交易日（short_history），没有完整的 day -60 窗口，不计入下面的统计。
+\* The high for SDGR's 2026 leg is as of 2026-10-09 and may not be the final high. SDGR's two 2020 legs are less than 120 trading days after its listing (short_history), have no complete day -60 window, and are excluded from the statistics below.
 
-## 3. day -60 ~ day 0 信号表现（10 个有效事件）
+## 3. Signal behavior from day -60 to day 0 (10 valid events)
 
-字段：横盘振幅 = day -60~-1 收盘最高/最低 - 1；rv 分位 = 20 日波动率在过去 252 日中的分位；量比 = 成交量 / 前 50 日均量；RS = 近 20 日收益 - XBI 近 20 日收益。
+Fields: base range = max/min of closes over day -60 to -1, minus 1; rv percentile = percentile of 20-day volatility within the past 252 days; volume ratio = volume / prior 50-day average volume; RS = last 20-day return - XBI last 20-day return.
 
-| 代码 | day 0 | 前60日振幅 | 前60日 rv 分位最低 | 前60日最大量比 | d0 120日区间振幅 | d0 rv 分位 | d0 量比 | d0 收盘位置 | d0 RS | day 0 未满足的 v0 条件 |
+| Ticker | day 0 | Prior 60d range | Prior 60d min rv pct | Prior 60d max vol ratio | d0 120d range | d0 rv pct | d0 vol ratio | d0 close position | d0 RS | v0 conditions not met on day 0 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PRME | 2024-05-01 | 118% | 0.28 | 9.7 | 140% | 0.60 | 1.2 | 0.57 | -5% | 横盘、低波、突破、量、收盘位置、RS |
-| PRME | 2025-06-06 | 77% | 0.77 | 6.0 | 223% | 0.91 | 2.5 | 0.94 | +20% | 横盘、低波、突破、量（$2 门槛时还有流动性） |
-| PRME | 2025-09-05 | 229% | 0.32 | 5.8 | 366% | 0.40 | 0.6 | 1.00 | -11% | 横盘、低波、突破、量、RS |
-| PRME | 2026-06-17 | 47% | 0.004 | 2.1 | 79% | 0.45 | 1.8 | 0.72 | +7% | 低波、突破、量 |
-| SDGR | 2020-11-23 | 33% | 0.008 | 3.1 | 115% | 0.41 | 2.6 | 0.69 | +8% | 低波、量 |
-| SDGR | 2022-05-17 | 69% | 0.50 | 3.4 | 102% | 0.88 | 1.1 | 0.86 | 0% | 横盘、低波、突破、量、RS |
-| SDGR | 2022-12-13 | 69% | 0.03 | 3.8 | 122% | 0.26 | 5.3 | 0.61 | -3% | 横盘、突破、收盘位置、RS |
-| SDGR | 2023-03-01 | 70% | 0.22 | 5.3 | 90% | 0.58 | 3.5 | 0.02 | +8% | 横盘、低波、突破、收盘位置 |
-| SDGR | 2023-11-02 | 85% | 0.004 | 1.5 | 185% | 0.29 | 3.4 | 0.49 | -5% | 横盘、突破、收盘位置、RS |
-| SDGR | 2026-08-06 | 46% | 0.008 | 2.7 | 63% | 0.04 | 2.2 | 0.58 | +12% | 突破、量、收盘位置 |
+| PRME | 2024-05-01 | 118% | 0.28 | 9.7 | 140% | 0.60 | 1.2 | 0.57 | -5% | base, low vol, breakout, volume, close position, RS |
+| PRME | 2025-06-06 | 77% | 0.77 | 6.0 | 223% | 0.91 | 2.5 | 0.94 | +20% | base, low vol, breakout, volume (plus liquidity at the $2 threshold) |
+| PRME | 2025-09-05 | 229% | 0.32 | 5.8 | 366% | 0.40 | 0.6 | 1.00 | -11% | base, low vol, breakout, volume, RS |
+| PRME | 2026-06-17 | 47% | 0.004 | 2.1 | 79% | 0.45 | 1.8 | 0.72 | +7% | low vol, breakout, volume |
+| SDGR | 2020-11-23 | 33% | 0.008 | 3.1 | 115% | 0.41 | 2.6 | 0.69 | +8% | low vol, volume |
+| SDGR | 2022-05-17 | 69% | 0.50 | 3.4 | 102% | 0.88 | 1.1 | 0.86 | 0% | base, low vol, breakout, volume, RS |
+| SDGR | 2022-12-13 | 69% | 0.03 | 3.8 | 122% | 0.26 | 5.3 | 0.61 | -3% | base, breakout, close position, RS |
+| SDGR | 2023-03-01 | 70% | 0.22 | 5.3 | 90% | 0.58 | 3.5 | 0.02 | +8% | base, low vol, breakout, close position |
+| SDGR | 2023-11-02 | 85% | 0.004 | 1.5 | 185% | 0.29 | 3.4 | 0.49 | -5% | base, breakout, close position, RS |
+| SDGR | 2026-08-06 | 46% | 0.008 | 2.7 | 63% | 0.04 | 2.2 | 0.58 | +12% | breakout, volume, close position |
 
-分段均值（rv 分位 / 量比 / RS，按 day -60~-41、-40~-21、-20~-6、-5~-1、0 分组）在 `reports/data/window_*_v0.csv` 里可以直接算。比较明显的两种形态：
+Segment averages (rv percentile / volume ratio / RS, grouped by day -60 to -41, -40 to -21, -20 to -6, -5 to -1, and 0) can be computed directly from `reports/data/window_*_v0.csv`. Two patterns stand out:
 
-- **先缩后放型**（PRME 2026-06、SDGR 2020-11、2023-11、2026-08）：day -60~-21 波动率分位压到 0.01–0.3，day -5 前后开始抬升，day 0 放量。v0 的方向是对的，问题出在检查时点。
-- **急跌反转型**（PRME 2024-05、2025-06、2025-09，SDGR 2022-05）：前 60 日振幅 70%–230%，波动率一直在高位，day 0 是超跌反弹。v0 抓不到，可能也不该抓（不属于“突破”逻辑）。
+- **Contract-then-expand** (PRME 2026-06, SDGR 2020-11, 2023-11, 2026-08): the volatility percentile is pressed down to 0.01-0.3 over day -60 to -21, starts rising around day -5, and volume expands on day 0. v0's direction is right; the problem is the timing of the check.
+- **Sharp-drop reversal** (PRME 2024-05, 2025-06, 2025-09, SDGR 2022-05): the prior 60-day range is 70%-230%, volatility stays high throughout, and day 0 is a rebound from oversold. v0 can't catch these, and perhaps shouldn't (they don't follow "breakout" logic).
 
-## 4. v0 扫描器在事件附近会不会触发
+## 4. Does the v0 scanner fire near the events?
 
-| 版本 | 全历史信号数 | 在大涨段内（day -60 ~ 段高点）触发 |
+| Version | Signals over full history | Fired inside a big up-leg (day -60 to leg high) |
 | --- | --- | --- |
-| v0（原文） | 0 | 无 |
-| v0b（低波动改为「60 日内出现过」） | 4 | SDGR 2023-03-01 段：2023-05-22（day +57，收 38.95，到高点 +42%）；SDGR 2026-08-06 段：2026-09-15（day +27，收 23.25，到当前高点 +40%） |
+| v0 (original) | 0 | none |
+| v0b (low vol changed to "occurred within 60 days") | 4 | SDGR 2023-03-01 leg: 2023-05-22 (day +57, close 38.95, +42% to the high); SDGR 2026-08-06 leg: 2026-09-15 (day +27, close 23.25, +40% to the current high) |
 
-v0b 全部信号及后续表现（`reports/data/scanner_signals_v0b.csv`）：
+All v0b signals and their follow-through (`reports/data/scanner_signals_v0b.csv`):
 
-| 代码 | 日期 | 收盘 | 量比 | +10日 | +20日 | +40日 | 40日内最大涨幅 | 40日内最大回撤 |
+| Ticker | Date | Close | Vol ratio | +10d | +20d | +40d | Max gain within 40d | Max drawdown within 40d |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | SDGR | 2023-05-22 | 38.95 | 6.0 | -2% | +21% | +34% | +42% | -14% |
 | SDGR | 2025-01-22 | 24.34 | 4.9 | +7% | -1% | -9% | +7% | -18% |
-| SDGR | 2026-09-15 | 23.25 | 3.7 | +31% | n/a | n/a | +40%（仅 18 日） | +3% |
-| PRME | 2026-10-07 | 3.90 | 3.6 | n/a | n/a | n/a | 仅 2 日 | — |
+| SDGR | 2026-09-15 | 23.25 | 3.7 | +31% | n/a | n/a | +40% (only 18 days) | +3% |
+| PRME | 2026-10-07 | 3.90 | 3.6 | n/a | n/a | n/a | only 2 days | - |
 
-## 5. 公告对照（day -30 ~ +5，只看表格类型）
+## 5. Filings cross-check (day -30 to +5, form types only)
 
-| 代码 | day 0 | 公告 |
+| Ticker | day 0 | Filings |
 | --- | --- | --- |
-| PRME | 2025-06-06 | 05-08 8-K(2.02 财报)；05-19 8-K(5.02 高管变动, 7.01, 8.01)；06-05 8-K(5.07 股东大会) |
-| PRME | 2025-09-05 | 08-07 8-K(2.02)；08-11 SCHEDULE 13D/A；09-08 8-K(7.01，在 day 0 之后) |
+| PRME | 2025-06-06 | 05-08 8-K(2.02 earnings); 05-19 8-K(5.02 officer change, 7.01, 8.01); 06-05 8-K(5.07 shareholder meeting) |
+| PRME | 2025-09-05 | 08-07 8-K(2.02); 08-11 SCHEDULE 13D/A; 09-08 8-K(7.01, after day 0) |
 | PRME | 2026-06-17 | 06-08 8-K(5.07) |
-| SDGR | 2020-11-23 | 11-12 8-K(2.02)；**11-23 8-K(1.01 重大协议)，与 day 0 同日** |
-| SDGR | 2022-05-17 | 05-04 8-K(2.02)；05-19 8-K(5.02) |
-| SDGR | 2023-03-01 | **02-28 8-K(2.02)，day 0 前一天** |
-| SDGR | 2023-11-02 | **11-01 8-K(2.02)，day 0 前一天** |
-| SDGR | 2026-08-06 | **08-05 8-K(2.02)，day 0 前一天** |
+| SDGR | 2020-11-23 | 11-12 8-K(2.02); **11-23 8-K(1.01 material agreement), same day as day 0** |
+| SDGR | 2022-05-17 | 05-04 8-K(2.02); 05-19 8-K(5.02) |
+| SDGR | 2023-03-01 | **02-28 8-K(2.02), the day before day 0** |
+| SDGR | 2023-11-02 | **11-01 8-K(2.02), the day before day 0** |
+| SDGR | 2026-08-06 | **08-05 8-K(2.02), the day before day 0** |
 
-PRME 2024-05-01、SDGR 2022-12-13 窗口内没有这几类公告。PRME 2025-06 那段的具体催化剂（合作、数据、入股）在 8-K 编号上看不出来，需要读正文。
+PRME 2024-05-01 and SDGR 2022-12-13 had none of these filing types in their windows. The specific catalyst for PRME's 2025-06 leg (partnership, data, equity investment) can't be seen from 8-K item numbers; the filing text needs to be read.
 
-## 6. 局限
+## 6. Limitations
 
-- 只有 2 支票、10 个有效事件，所有统计都只是描述，不能当证据；还没有对照组。
-- day 0 是机械规则给的，fallback 的那几个（尤其 PRME 2024-05、2025-09）起涨点比较模糊。
-- 市值、行业、现金跑道、ATM 增发这几条过滤还没实现（需要 SEC XBRL 财务数据）。
-- 价格是拆股调整后的价格。价格门槛已从 2 美元放宽到 1 美元（见第 8 节）。
+- Only 2 tickers and 10 valid events; all statistics are descriptive only and cannot be treated as evidence; there is no control group yet.
+- Day 0 comes from a mechanical rule; the fallback ones (especially PRME 2024-05 and 2025-09) have fuzzy ignition points.
+- The market-cap, sector, cash runway, and ATM offering filters are not implemented yet (they need SEC XBRL financial data).
+- Prices are split-adjusted. The price threshold has been relaxed from $2 to $1 (see Section 8).
 
-## 7. 下一步建议
+## 7. Suggested next steps
 
-1. 补样本（见 STRATEGY.md 第 2 节），至少凑到 10 支票、30 个以上事件再调参。
-2. 低波动条件改成「base 内出现过收敛」（v0b），量比门槛在 2–3 倍之间做敏感性测试。
-3. 加一条「反转型」规则单独研究（急跌后放量长阳），和突破型分开统计。
-4. 做对照组：在生物科技股票池里跑 v0b，统计全部信号，而不是只看样本股。
-5. 把财报 8-K（2.02）的次日作为一个事件特征加进来，SDGR 有 3 次起涨都在财报后一天。
+1. Add samples (see STRATEGY.md Section 2): get to at least 10 tickers and 30+ events before tuning parameters.
+2. Change the low-volatility condition to "contraction occurred within the base" (v0b), and run a sensitivity test on the volume-ratio threshold between 2x and 3x.
+3. Study a separate "reversal" rule (a long high-volume green bar after a sharp drop), with statistics kept apart from the breakout type.
+4. Build a control group: run v0b over a biotech universe and count all signals, instead of looking only at the sample tickers.
+5. Add "the day after an earnings 8-K (2.02)" as an event feature; 3 of SDGR's ignitions came the day after earnings.
 
-## 8. 更新：价格门槛 2 美元 → 1 美元（2026-10-10）
+## 8. Update: price threshold $2 -> $1 (2026-10-10)
 
-`configs/scanner_v0.yaml` 和 `scanner_v0b.yaml` 的 `min_price` 都改成了 1.0，其余参数不变，重跑了一遍。
+`min_price` in both `configs/scanner_v0.yaml` and `scanner_v0b.yaml` was changed to 1.0, with all other parameters unchanged, and everything was rerun.
 
-- **信号数没有变化**：v0 还是 0 个，v0b 还是那 4 个（SDGR 2023-05-22、2025-01-22、2026-09-15，PRME 2026-10-07）。
-- PRME 2025-06-06 的 day 0 不再被流动性条件挡住，但横盘、低波、突破、量这几条照样不满足。
-- PRME 2025-05 到 2025-10 这一段里，所有涨幅 ≥ 8% 或量比 ≥ 3 的日子（共 26 天）没有一天满足 ok_tight_base：起涨前 60 日振幅已经在 90% 以上，120 日振幅超过 200%。这一段属于急跌后的反转，不是平台突破，所以放宽价格门槛也不会触发。
-- 结论：卡住 PRME 这类“低价押注”样本的是横盘和低波动条件，不是价格。如果要抓这类票，需要第 7 节第 3 条说的“反转型”单独规则。
-
+- **The signal count did not change**: v0 still has 0, and v0b still has the same 4 (SDGR 2023-05-22, 2025-01-22, 2026-09-15, PRME 2026-10-07).
+- PRME's 2025-06-06 day 0 is no longer blocked by the liquidity condition, but it still fails the base, low-vol, breakout, and volume conditions.
+- In PRME's 2025-05 to 2025-10 leg, none of the days with a gain >= 8% or a volume ratio >= 3 (26 days in total) satisfied ok_tight_base: the 60-day range before ignition was already above 90%, and the 120-day range exceeded 200%. This leg is a reversal after a sharp drop, not a base breakout, so relaxing the price threshold won't make it fire either.
+- Conclusion: what blocks "low-priced bet" samples like PRME is the base and low-volatility conditions, not price. Catching these tickers would need the separate "reversal" rule described in Section 7, item 3.

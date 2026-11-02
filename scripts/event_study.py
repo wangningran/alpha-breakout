@@ -1,13 +1,13 @@
-"""样本事件复盘：大涨段识别 + day -60~0 信号表现 + v0 扫描器触发检查。
+"""Sample event review: rally detection + signal behavior over day -60..0 + v0 scanner trigger check.
 
-用法：
+Usage:
     PYTHONPATH=src python scripts/event_study.py [--refresh] [--config configs/scanner_v0.yaml] [--tag v0]
 
-输出到 reports/data/：
-    rallies_<tag>.csv        每个大涨段（低点 / day0 / 高点 / 涨幅 / 扫描器是否触发）
-    window_<T>_<day0>_<tag>.csv   day -60 ~ day 0 的逐日指标
-    scanner_signals_<tag>.csv 全历史扫描器触发日 + 之后 10/20/40 日表现（简易对照）
-    filings_near_day0.csv    day0 前后 SEC 公告（8-K / 13D / S-3 / 424B5）
+Output to reports/data/:
+    rallies_<tag>.csv        each rally (trough / day0 / peak / gain / whether the scanner triggered)
+    window_<T>_<day0>_<tag>.csv   daily indicators from day -60 to day 0
+    scanner_signals_<tag>.csv all historical scanner trigger days + returns 10/20/40 days later (simple comparison)
+    filings_near_day0.csv    SEC filings around day0 (8-K / 13D / S-3 / 424B5)
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def main():
     ap.add_argument("--config", default=None)
     ap.add_argument("--samples", default=str(ROOT / "configs" / "samples.yaml"))
     ap.add_argument("--no-sec", action="store_true")
-    ap.add_argument("--tag", default="v0", help="输出文件名后缀，区分不同参数版本")
+    ap.add_argument("--tag", default="v0", help="output file name suffix, to tell parameter versions apart")
     args = ap.parse_args()
     tag = args.tag
 
@@ -68,7 +68,7 @@ def main():
         feats = feats[feats.index >= pd.Timestamp(start)] if start else feats
         px = df.loc[feats.index]
 
-        # 全历史扫描器信号
+        # full-history scanner signals
         for d in feats.index[feats["signal"]]:
             sig_rows.append({"ticker": t, "date": d.date(), "close": round(feats.at[d, "close"], 2),
                              "vol_ratio": round(feats.at[d, "vol_ratio"], 2),
@@ -84,7 +84,7 @@ def main():
         if not args.no_sec:
             try:
                 fil = sec.filings(t, refresh=args.refresh)
-            except Exception as e:  # 拉不到就如实记录
+            except Exception as e:  # if it can't be fetched, just record that
                 print(f"[warn] SEC {t}: {e}")
 
         for _, r in rallies.iterrows():
@@ -94,7 +94,7 @@ def main():
             w[["rel_day", *SNAPSHOT_COLS, *CONDITIONS, "n_conditions", "signal"]].to_csv(
                 OUT / f"window_{t}_{day0.date()}_{tag}.csv", float_format="%.4f")
 
-            # 扫描器检查：day -60 到 段高点（无高点则到 day0 + 40）
+            # scanner check: day -60 through the leg peak (or day0 + 40 if there is no peak)
             end = pd.Timestamp(r["peak_date"]) if pd.notna(r.get("peak_date")) else day0 + pd.Timedelta(days=60)
             chk = feats.loc[w.index[0]: end]
             idx0 = feats.index.get_loc(day0)

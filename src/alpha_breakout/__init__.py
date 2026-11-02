@@ -1,1 +1,1 @@
-"""Alpha Breakout：美股小盘生物科技 / AI 制药突破策略研究。"""
+"""Alpha Breakout: breakout strategy research for US small-cap biotech / AI drug discovery."""

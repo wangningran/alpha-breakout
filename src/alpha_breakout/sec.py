@@ -1,6 +1,6 @@
-"""SEC EDGAR 公告列表（submissions API），带本地缓存。
+"""SEC EDGAR filing lists (submissions API) with a local cache.
 
-SEC 要求 User-Agent 带联系方式（"名称 邮箱"），通过环境变量 SEC_USER_AGENT 设置。
+The SEC requires a User-Agent with contact info ("name email"), set via the SEC_USER_AGENT environment variable.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIR = ROOT / "data" / "cache" / "sec"
 DEFAULT_UA = "alpha-breakout research contact@example.com"
 
-# 策略关心的表格类型
+# Form types the strategy cares about
 CATALYST_FORMS = {"8-K", "SC 13D", "SC 13D/A", "SCHEDULE 13D", "SCHEDULE 13D/A"}
 DILUTION_FORMS = {"S-3", "S-3ASR", "424B5", "424B3", "S-1", "S-3/A"}
 
@@ -34,13 +34,13 @@ def _get(url: str) -> dict:
 
 
 def _cached_json(name: str, url: str, refresh: bool, static: bool = False) -> dict:
-    """static=True：历史数据不会变，有缓存就用；否则缓存只在当天有效。"""
+    """static=True: historical data never changes, so use the cache if present; otherwise the cache is valid only for the day."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / name
     fresh = path.exists() and (static or dt.date.fromtimestamp(path.stat().st_mtime) == dt.date.today())
     if refresh or not fresh:
         path.write_text(json.dumps(_get(url)))
-        time.sleep(0.2)  # SEC 限速 10 req/s
+        time.sleep(0.2)  # SEC limit is 10 req/s
     return json.loads(path.read_text())
 
 
@@ -49,11 +49,11 @@ def ticker_to_cik(ticker: str, refresh: bool = False) -> int:
     for row in data.values():
         if row["ticker"].upper() == ticker.upper():
             return int(row["cik_str"])
-    raise KeyError(f"SEC 没有找到 {ticker} 的 CIK")
+    raise KeyError(f"SEC has no CIK for {ticker}")
 
 
 def filings(ticker: str, refresh: bool = False) -> pd.DataFrame:
-    """返回该公司全部公告：filingDate, form, accessionNumber, primaryDocument, items, url。"""
+    """Return all filings for the company: filingDate, form, accessionNumber, primaryDocument, items, url."""
     cik = ticker_to_cik(ticker, refresh)
     sub = _cached_json(f"CIK{cik:010d}.json", f"https://data.sec.gov/submissions/CIK{cik:010d}.json", refresh)
     frames = [pd.DataFrame(sub["filings"]["recent"])]

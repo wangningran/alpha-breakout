@@ -1,4 +1,4 @@
-"""读取扫描器参数（YAML）。"""
+"""Load scanner parameters (YAML)."""
 from __future__ import annotations
 
 import copy
@@ -11,7 +11,7 @@ DEFAULT_CONFIG = ROOT / "configs" / "scanner_v0.yaml"
 
 
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> dict:
-    """读 YAML 配置；overrides 是嵌套 dict，按 key 覆盖，方便调参扫描。"""
+    """Read the YAML config; overrides is a nested dict merged by key, handy for parameter sweeps."""
     with open(path or DEFAULT_CONFIG, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if overrides:

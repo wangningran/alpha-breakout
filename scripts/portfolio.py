@@ -1,11 +1,11 @@
-"""组合层面模拟：读取 backtest.py 输出的逐笔交易，放进有资金和仓位上限的账户里跑资金曲线。
+"""Portfolio-level simulation: read the per-trade output of backtest.py and run an equity curve in an account with capital and position limits.
 
-用法：
+Usage:
     python scripts/portfolio.py --tag v3 [--mode staged|immediate] [--set portfolio.max_positions=20 ...]
 
-组合参数默认取该 tag 回测时的配置（summary_<tag>.json 里的 portfolio 节），可以用 --set 覆盖，
-例如 --set portfolio.order=rs60_asc portfolio.idle_asset=IWM --label rs_iwm。
-输出：reports/data/portfolio_<tag>_<mode>[_label].json、equity_<tag>_<mode>[_label].csv（中位数种子的资金曲线）
+Portfolio parameters default to the config of that tag's backtest (the portfolio section of summary_<tag>.json) and can be overridden with --set,
+e.g. --set portfolio.order=rs60_asc portfolio.idle_asset=IWM --label rs_iwm.
+Output: reports/data/portfolio_<tag>_<mode>[_label].json, equity_<tag>_<mode>[_label].csv (equity curve of the median seed)
 """
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     ap.add_argument("--mode", default="staged", choices=["staged", "immediate"])
     ap.add_argument("--set", nargs="*")
     ap.add_argument("--seeds", type=int)
-    ap.add_argument("--label", default="", help="输出文件名后缀，区分不同组合参数")
+    ap.add_argument("--label", default="", help="output file name suffix, to tell portfolio parameter sets apart")
     a = ap.parse_args()
     out = run(a.tag, a.mode, parse_set(a.set), a.seeds, a.label)
     print(json.dumps(out["summary"], indent=2, ensure_ascii=False))

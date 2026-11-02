@@ -1,13 +1,13 @@
-"""内部人交易（SEC Form 4）：公开市场买入 / 卖出。
+"""Insider trades (SEC Form 4): open-market buys / sells.
 
-两步：
-1. form4_index(ciks)：从 submissions API 拿到每家公司的 Form 4 列表（申报日、文件编号、主文档），
-   缓存 data/cache/form4_index.parquet。
-2. form4_details(rows)：逐份下载 Form 4 XML，解析非衍生品交易，缓存 data/cache/form4_tx.parquet。
-   只保留交易代码 P（公开市场买入）和 S（公开市场卖出）；
-   记录交易日、股数、价格、金额、申报人身份（董事 / 高管 / 10% 股东）、是否按 10b5-1 计划交易。
+Two steps:
+1. form4_index(ciks): get each company's Form 4 list from the submissions API (filing date, accession number, primary document),
+   cached in data/cache/form4_index.parquet.
+2. form4_details(rows): download each Form 4 XML and parse non-derivative transactions, cached in data/cache/form4_tx.parquet.
+   Only transaction codes P (open-market purchase) and S (open-market sale) are kept;
+   records transaction date, shares, price, value, filer role (director / officer / 10% owner), and whether it was under a 10b5-1 plan.
 
-SEC 限速 10 req/s，这里约 8 req/s。
+SEC limit is 10 req/s; we use about 8 req/s.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from .filings import _throttle as _throttle_base
 
 
 def _throttle():
-    _throttle_base(0.11)  # 约 9 req/s，低于 SEC 的 10 req/s
+    _throttle_base(0.11)  # about 9 req/s, under the SEC's 10 req/s
 
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = ROOT / "data" / "cache" / "form4_index.parquet"
@@ -98,7 +98,7 @@ def parse_form4(xml_text: str) -> tuple[dict, list[dict]]:
         px = float(_txt(t, "transactionAmounts/transactionPricePerShare/value") or 0)
         txs.append({"tx_date": _txt(t, "transactionDate/value"), "code": code,
                     "shares": sh, "price": px, "value": sh * px})
-    # 早期没有 aff10b5One 元素，脚注里提到 10b5-1 也算计划内交易
+    # early filings lack the aff10b5One element; a footnote mentioning 10b5-1 also counts as a plan trade
     if not who["plan_10b5_1"]:
         notes = " ".join((n.text or "") for n in root.findall("footnotes/footnote"))
         who["plan_10b5_1"] = "10b5-1" in notes
@@ -107,7 +107,7 @@ def parse_form4(xml_text: str) -> tuple[dict, list[dict]]:
 
 def _fetch_one(row) -> list[dict]:
     cik, acc, doc = int(row.cik), row.accession, row.doc
-    raw = doc.split("/")[-1]  # 去掉 xslF345X0x/ 渲染目录，拿原始 XML
+    raw = doc.split("/")[-1]  # strip the xslF345X0x/ render directory to get the raw XML
     url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{raw}"
     _throttle()
     import os
@@ -124,7 +124,7 @@ def _fetch_one(row) -> list[dict]:
 
 
 def form4_details(rows: pd.DataFrame, workers: int = 8, save_every: int = 2000, log=print) -> pd.DataFrame:
-    """逐份下载解析，每 save_every 份落盘一次（中断后重跑会跳过已完成的）。"""
+    """Download and parse one by one, saving every save_every filings (a rerun after an interruption skips completed ones)."""
     old = pd.read_parquet(TX) if TX.exists() else None
     done = set(old["accession"]) if old is not None else set()
     todo = rows[~rows["accession"].isin(done)].drop_duplicates("accession")
@@ -156,7 +156,7 @@ def load_tx() -> pd.DataFrame | None:
 
 
 def insider_features(tx: pd.DataFrame | None, start, end) -> dict:
-    """[start, end] 期间（按申报日）公开市场买卖的金额和笔数；排除 10b5-1 计划内卖出另算。"""
+    """Value and count of open-market buys / sells in [start, end] (by filing date); discretionary sells (excluding 10b5-1 plans) are counted separately."""
     out = {"ins_sell_value": 0.0, "ins_sell_n": 0, "ins_sell_value_discr": 0.0,
            "ins_buy_value": 0.0, "ins_buy_n": 0}
     if tx is None or tx.empty:

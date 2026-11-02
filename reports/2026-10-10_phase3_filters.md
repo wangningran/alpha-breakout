@@ -1,115 +1,115 @@
-# 第三阶段：数据清洗、增发过滤、催化剂分类
+# Phase 3: Data cleaning, offering filter, catalyst classification
 
-- 日期：2026-10-10
-- 基础：v1 规则和股票池不变（全行业小盘股 4956 支，2019-06 到 2026-10-09，不含退市股）。
-- 新数据：SEC 全市场公告索引，4956 家公司共 311 万条，只用日期、表格类型、8-K item 编号。
-  - 缓存在 `data/cache/filings.parquet`；
-  - 拉取脚本 `scripts/fetch_filings.py`，首次约 15 分钟。
-- 新配置：`configs/strategy_v2.yaml`（v1 加上 clean / filters 两节）。
-- 复现：`python scripts/backtest.py --config configs/strategy_v2.yaml --tag v2`（脚本原名 backtest_v1.py）；其余变体用 `--set`。
-- 判断口径：每个改动都看 2019–23 和 2024–26 两段。只在一段里变好的，不算有效。
+- Date: 2026-10-10
+- Basis: v1 rules and universe unchanged (4956 small caps across all sectors, 2019-06 to 2026-10-09, excluding delisted stocks).
+- New data: SEC full-market filings index, 3.11 million records across 4956 companies, using only the date, form type, and 8-K item numbers.
+  - Cached in `data/cache/filings.parquet`;
+  - Fetch script `scripts/fetch_filings.py`, about 15 minutes the first time.
+- New config: `configs/strategy_v2.yaml` (v1 plus two sections, clean / filters).
+- Reproduce: `python scripts/backtest.py --config configs/strategy_v2.yaml --tag v2` (the script was originally named backtest_v1.py); other variants use `--set`.
+- Evaluation standard: every change is checked in both 2019-23 and 2024-26. A change that only improves one period doesn't count as effective.
 
-## 1. 结论
+## 1. Conclusions
 
-1. **三个过滤器都是合理的风控，但都没有带来优势**。2024–26 年这段，所有版本的期望都在 -0.13R 左右，和 v1 一样。
-2. **清洗之后结果变差了一点**（+0.048R → +0.027R）。说明 v1 有一部分收益来自实际买不到的票，比如 MGRT：异动前每天只成交几千股。这部分收益本来就不该算。
-3. **增发过滤要分开看**：
-   - 异动前后就有增发公告的异动：清洗后、不做增发过滤时，这类交易在两段里分别是 -0.50R、-0.55R，稳定亏钱。过滤掉它们是对的。
-   - 把"观察期内出现增发"也一并过滤：结果反而变差（+0.035R → +0.015R），所以默认不用。可能原因是，公司趁股价强势发股后，股价并不一定走坏。
-   - 持仓中出现增发就卖出：也变差（-0.033R）。
-4. **催化剂分类**里，两段方向一致的只有两类，都是负面的：
-   - 增发类异动：上面说过，稳定亏钱，已经过滤。
-   - 财报驱动的异动：两段分别是 -0.26R 和 -0.10R，样本 1100+ 笔。排除后全期变好（+0.035R → +0.078R），但 2024–26 年依然是 -0.137R，所以默认不排除，保留成可选项。
-   - 13D 大股东入股：2024–26 年 +1.45R（74 笔），但 2019–23 年 -0.34R（37 笔），样本小、方向不一致，先不下结论。
-5. **最关键的诊断：问题出在选出来的票，不在仓位管理**。我统计了 v2_clean 的 4443 次试仓信号，看入场后股价本身怎么走：
-   - 中位数相对 IWM，20 天后跑输约 3%，60 天后跑输 6–8%；
-   - 60 天后跑赢 IWM 的比例：2019–23 年 43%，2024–26 年 36%；
-   - 平均值接近 0，靠的是少数暴涨股。
+1. **All three filters are sensible risk controls, but none of them adds an edge**. In 2024-26, every version has an expectancy around -0.13R, the same as v1.
+2. **Results got slightly worse after cleaning** (+0.048R -> +0.027R). This shows part of v1's return came from tickers that couldn't actually be bought, such as MGRT: before the surge it traded only a few thousand shares a day. That return should never have counted.
+3. **The offering filter needs to be looked at in parts**:
+   - Surges with an offering filing right around the surge: after cleaning and without the offering filter, these trades were -0.50R and -0.55R in the two periods, consistently losing money. Filtering them out is right.
+   - Also filtering out "an offering during the watch period": the results actually got worse (+0.035R -> +0.015R), so it's off by default. A possible reason is that when a company issues shares into price strength, the stock doesn't necessarily turn bad afterwards.
+   - Selling when an offering appears while holding: also worse (-0.033R).
+4. In **catalyst classification**, only two categories point the same direction in both periods, and both are negative:
+   - Offering-type surges: as noted above, consistently losing money; already filtered.
+   - Earnings-driven surges: -0.26R and -0.10R in the two periods, sample of 1100+ trades. Excluding them improves the full period (+0.035R -> +0.078R), but 2024-26 is still -0.137R, so they are not excluded by default and are kept as an option.
+   - 13D large-holder stake: +1.45R in 2024-26 (74 trades), but -0.34R in 2019-23 (37 trades); small sample and inconsistent direction, so no conclusion yet.
+5. **The most important diagnosis: the problem is in the tickers selected, not in position management**. I took the 4443 probe signals from v2_clean and looked at how the stock itself moved after entry:
+   - The median underperforms IWM by about 3% after 20 days, and by 6-8% after 60 days;
+   - Share outperforming IWM after 60 days: 43% in 2019-23, 36% in 2024-26;
+   - The mean is close to 0, propped up by a few explosive movers.
 
-   这和学术上的"彩票股效应"（MAX effect）一致：单日暴涨的小盘股，之后整体倾向于跑输。纯看价格的规则，选出来的大多是"彩票"。
-6. **拿得更久能吃到更多右尾，但不稳**。跟踪均线 20 日 → 50 日后：
-   - 全期 +0.18R，2024–26 年 +0.02R，是唯一转正的变体；
-   - 但去掉收益最高的 1% 交易后，平均每笔 -0.39R；2025 年 +0.54R、2026 年 -0.68R，年度波动很大；
-   - 最大回撤扩大到 -957R。
+   This matches the "lottery stock effect" in the academic literature (MAX effect): small caps with a big single-day jump tend to underperform afterwards as a group. A purely price-based rule mostly selects "lottery tickets".
+6. **Holding longer captures more of the right tail, but it's not stable**. After changing the trailing MA from 20 to 50 days:
+   - Full period +0.18R, 2024-26 +0.02R, the only variant that turns positive;
+   - But after removing the top 1% of trades by return, the average per trade is -0.39R; 2025 is +0.54R and 2026 is -0.68R, so year-to-year swings are large;
+   - Max drawdown widens to -957R.
 
-## 2. 新增规则（`configs/strategy_v2.yaml`）
+## 2. New rules (`configs/strategy_v2.yaml`)
 
-| 模块 | 规则 | 默认 |
+| Module | Rule | Default |
 | --- | --- | --- |
-| 数据清洗 | 有行情的交易日 ≥ 120；异动前 20 日平均成交额 ≥ 100 万美元；异动前 20 日零成交天数 ≤ 2；试仓当天 20 日平均成交额 ≥ 200 万美元 | 开 |
-| 增发过滤 | 异动日前 5 天到异动当天，出现 424B1 / 424B4 / 424B5 / S-1 / F-1（含 /A）→ 不入池 | 开 |
-| 增发过滤：观察期 | 观察期内出现上述公告 → 异动作废 | 关（回测更差） |
-| 增发过滤：储架 | S-3 / F-3 也算 | 关 |
-| 增发过滤：持仓 | 持仓中出现增发公告 → 次日开盘卖出 | 关（回测更差） |
-| 催化剂标签 | 异动日前 3 天到后 1 天的公告，按优先级归类：增发 > 13D > 8-K item（1.01 协议 / 2.01 收购 / 2.02 财报 / 8.01 其他事件 / 7.01 Reg FD）> 其他 8-K > 无公告 | 只打标签 |
-| 催化剂排除 | `filters.catalyst.exclude`，例如 `[earnings]` | 空 |
+| Data cleaning | Trading days with price data >= 120; 20-day average dollar volume before the surge >= $1M; zero-volume days in the 20 days before the surge <= 2; 20-day average dollar volume on the probe day >= $2M | On |
+| Offering filter | 424B1 / 424B4 / 424B5 / S-1 / F-1 (including /A) from 5 days before the surge through the surge day -> not added to the watchlist | On |
+| Offering filter: watch period | Any of the above filings during the watch period -> surge invalidated | Off (worse in backtest) |
+| Offering filter: shelf | S-3 / F-3 also count | Off |
+| Offering filter: holding | Offering filing while holding -> sell at the next day's open | Off (worse in backtest) |
+| Catalyst label | Filings from 3 days before to 1 day after the surge, classified by priority: offering > 13D > 8-K item (1.01 agreement / 2.01 acquisition / 2.02 earnings / 8.01 other events / 7.01 Reg FD) > other 8-K > no filing | Label only |
+| Catalyst exclusion | `filters.catalyst.exclude`, e.g. `[earnings]` | Empty |
 
-NXH 2020 年那笔 +1140% 核实过了，是真实行情：NXH 就是 Overstock（后改名 Beyond、Bed Bath & Beyond），不是代码复用造成的数据错误。
+NXH's +1140% trade in 2020 has been verified and is a real move: NXH is Overstock (later renamed Beyond, Bed Bath & Beyond), not a data error caused by ticker reuse.
 
-## 3. 对比（每次只改一项；R 以试仓风险为 1R）
+## 3. Comparison (one change at a time; R uses the probe risk as 1R)
 
-| 版本 | 改动 | 交易数 | 胜率 | 期望(R) | 总R | 最大回撤(R) | 最长连亏 | 2019–23 期望 | 2024–26 期望 |
+| Version | Change | Trades | Win rate | Expectancy (R) | Total R | Max drawdown (R) | Longest losing streak | 2019-23 expectancy | 2024-26 expectancy |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| v1 | 基准 | 4675 | 25% | +0.048 | +221 | -719 | 60 | +0.153 | -0.072 |
-| v2_clean | + 数据清洗 | 4443 | 25% | +0.027 | +119 | -718 | 55 | +0.168 | -0.132 |
-| **v2** | + 异动时增发过滤（默认） | 4390 | 25% | +0.035 | +151 | -696 | 56 | +0.183 | -0.133 |
-| v2 + 观察期增发过滤 | | 4124 | 25% | +0.015 | +62 | -643 | 52 | +0.147 | -0.133 |
-| v2 + 观察期过滤 + 储架也算增发 | | 4000 | 25% | +0.034 | +134 | -623 | 52 | +0.147 | -0.094 |
-| v2 + 观察期过滤 + 持仓遇增发卖出 | | 4104 | 26% | -0.033 | -136 | -657 | 56 | +0.066 | -0.145 |
-| v2 + 观察期过滤 + 增发回看 30 天 | | 3958 | 25% | +0.012 | +49 | -584 | 51 | +0.121 | -0.110 |
-| v2 + 排除财报异动 | | 3767 | 24% | +0.078 | +293 | -587 | 54 | +0.265 | -0.137 |
-| v2_clean + 50 日跟踪 | 出场放宽 | 4345 | 23% | +0.177 | +764 | -957 | 79 | +0.316 | +0.019 |
-| v2_clean + 2R 才加仓 | 加仓更晚 | 4623 | 31% | +0.026 | +120 | -608 | 63 | +0.137 | -0.098 |
-| 对照：v2 直接追 | | 11792 | 29% | -0.068 | -802 | -962 | 67 | -0.049 | -0.091 |
+| v1 | Baseline | 4675 | 25% | +0.048 | +221 | -719 | 60 | +0.153 | -0.072 |
+| v2_clean | + data cleaning | 4443 | 25% | +0.027 | +119 | -718 | 55 | +0.168 | -0.132 |
+| **v2** | + offering filter at surge (default) | 4390 | 25% | +0.035 | +151 | -696 | 56 | +0.183 | -0.133 |
+| v2 + watch-period offering filter | | 4124 | 25% | +0.015 | +62 | -643 | 52 | +0.147 | -0.133 |
+| v2 + watch-period filter + shelf counts as offering | | 4000 | 25% | +0.034 | +134 | -623 | 52 | +0.147 | -0.094 |
+| v2 + watch-period filter + sell on offering while holding | | 4104 | 26% | -0.033 | -136 | -657 | 56 | +0.066 | -0.145 |
+| v2 + watch-period filter + 30-day offering lookback | | 3958 | 25% | +0.012 | +49 | -584 | 51 | +0.121 | -0.110 |
+| v2 + exclude earnings surges | | 3767 | 24% | +0.078 | +293 | -587 | 54 | +0.265 | -0.137 |
+| v2_clean + 50-day trailing | Looser exit | 4345 | 23% | +0.177 | +764 | -957 | 79 | +0.316 | +0.019 |
+| v2_clean + add only at 2R | Later add | 4623 | 31% | +0.026 | +120 | -608 | 63 | +0.137 | -0.098 |
+| Control: v2 chase directly | | 11792 | 29% | -0.068 | -802 | -962 | 67 | -0.049 | -0.091 |
 
-注："观察期过滤"那几行跑的时候默认开着观察期增发过滤，后来才改成默认关闭。明细在 `summary_v2_shelf.json`、`summary_v2_exitoff.json`、`summary_v2_lb30.json`。"v2 + 观察期增发过滤"本身的 JSON 已被最终的 `summary_v2.json` 覆盖，数字来自当时的运行输出。
+Note: the "watch-period filter" rows were run while the watch-period offering filter was on by default; it was only switched to off by default later. Details are in `summary_v2_shelf.json`, `summary_v2_exitoff.json`, `summary_v2_lb30.json`. The JSON for "v2 + watch-period offering filter" itself was overwritten by the final `summary_v2.json`; its numbers come from the run output at the time.
 
-**稳健性检查**（单笔收益封顶 20R，看是否只靠极端值）：
+**Robustness check** (each trade capped at 20R, to see whether results depend only on outliers):
 
-| 版本 | 全期 | 不含 2020 | 2024–26 |
+| Version | Full period | Excluding 2020 | 2024-26 |
 | --- | --- | --- | --- |
 | v1 | -0.14R | -0.16R | -0.16R |
 | v2_clean | -0.15R | -0.18R | -0.18R |
-| v2 + 排除财报 + 异动时增发过滤 | -0.12R | -0.16R | -0.20R |
-| v2_clean + 50 日跟踪 | -0.20R | -0.18R | -0.28R |
+| v2 + exclude earnings + offering filter at surge | -0.12R | -0.16R | -0.20R |
+| v2_clean + 50-day trailing | -0.20R | -0.18R | -0.28R |
 
-封顶以后所有版本都是负的。也就是说，目前所有的正期望都来自极少数大赢家。
+After capping, every version is negative. In other words, all of the current positive expectancy comes from a very small number of big winners.
 
-## 4. 催化剂分类（v2 默认配置）
+## 4. Catalyst classification (v2 default config)
 
-| 类别 | 2019–23 交易数 | 2019–23 期望 | 2024–26 交易数 | 2024–26 期望 |
+| Category | 2019-23 trades | 2019-23 expectancy | 2024-26 trades | 2024-26 expectancy |
 | --- | --- | --- | --- | --- |
-| 无公告 | 1364 | +0.28R | 1076 | -0.25R |
-| 财报（2.02） | 528 | -0.26R | 639 | -0.10R |
-| 重大协议（1.01） | 103 | +0.73R | 81 | -0.61R |
-| 13D 大股东入股 | 37 | -0.34R | 74 | +1.45R |
-| 其他事件（8.01） | 108 | -0.05R | 74 | +0.26R |
-| Reg FD（7.01） | 72 | +1.27R | 54 | -0.06R |
-| 增发 / 储架（未被过滤的：异动次日申报，或 S-3 / F-3） | 32 | +0.04R | 30 | -0.64R |
+| No filing | 1364 | +0.28R | 1076 | -0.25R |
+| Earnings (2.02) | 528 | -0.26R | 639 | -0.10R |
+| Material agreement (1.01) | 103 | +0.73R | 81 | -0.61R |
+| 13D large-holder stake | 37 | -0.34R | 74 | +1.45R |
+| Other events (8.01) | 108 | -0.05R | 74 | +0.26R |
+| Reg FD (7.01) | 72 | +1.27R | 54 | -0.06R |
+| Offering / shelf (not filtered: filed the day after the surge, or S-3 / F-3) | 32 | +0.04R | 30 | -0.64R |
 
-除了财报和增发，其他类别两段方向都相反，说明这一层信息（只有表格类型、不读正文）区分度不够。
+Apart from earnings and offerings, every category flips direction between the two periods, which shows this layer of information (form types only, without reading the text) doesn't discriminate well enough.
 
-## 5. 入场后的股价表现（v2_clean 的 4443 次试仓，从入场开盘价算，不含仓位管理）
+## 5. Post-entry price performance (v2_clean's 4443 probes, measured from the entry open, excluding position management)
 
-| 时段 | 指标 | 5 天 | 20 天 | 60 天 | 20 天相对 IWM | 60 天相对 IWM |
+| Period | Metric | 5 days | 20 days | 60 days | 20 days vs IWM | 60 days vs IWM |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2019–23 | 平均 | -0.3% | +1.4% | +6.9% | -0.1% | +2.9% |
-| 2019–23 | 中位数 | -1.2% | -2.0% | -2.8% | -3.7% | -6.0% |
-| 2024–26 | 平均 | +0.3% | +0.5% | +2.3% | -0.4% | -0.9% |
-| 2024–26 | 中位数 | -1.1% | -2.3% | -6.3% | -3.1% | -8.4% |
+| 2019-23 | Mean | -0.3% | +1.4% | +6.9% | -0.1% | +2.9% |
+| 2019-23 | Median | -1.2% | -2.0% | -2.8% | -3.7% | -6.0% |
+| 2024-26 | Mean | +0.3% | +0.5% | +2.3% | -0.4% | -0.9% |
+| 2024-26 | Median | -1.1% | -2.3% | -6.3% | -3.1% | -8.4% |
 
-2020 年 60 天平均 +29%，其余年份大多为负。
+In 2020 the 60-day mean was +29%; most other years were negative.
 
-## 6. 下一步迭代建议
+## 6. Suggestions for the next iteration
 
-价格信号挑出来的是"彩票股"，所以下一步的重点是**加入价格以外的信息**，把少数真正有基本面变化的票挑出来。这也对应你流程里"开始研究"那一步。按优先级：
+Price signals pick "lottery stocks", so the focus of the next step is **adding information beyond price** to pick out the few tickers with a real fundamental change. This also corresponds to the "start research" step in your process. In priority order:
 
-1. **内部人买入（Form 4，交易代码 P）**：异动后观察期内，高管自己掏钱在公开市场买入，是最经典的"知情人认可"信号。SEC 有数据，需要解析 Form 4 XML，只解析异动公司在观察期内的申报，量不大。
-2. **13D / 13G 机构入股**：2024–26 年 74 笔 +1.45R，但早期样本是负的，需要和第 1 条合起来看。你的 PRME 样本里也有"大药企入股"。
-3. **基本面拐点**：从 SEC XBRL 取营收增速、毛利、现金跑道。区分"业务真在变好"和"纯题材"。可以看营收同比加速、现金能撑 12 个月以上这两条。
-4. **组合层面模拟**：设定每笔风险（比如 0.25% 账户）、最多同时持仓数、每天最多开几笔，算真实资金曲线。只有这样才能判断"靠少数大赢家"在现实里能不能吃到（大赢家出现时你是否还有仓位、有资金）。
-5. **出场再研究**：右尾很重要（50 日跟踪让 2024–26 年转正），但目前不稳。可以试 ATR 跟踪、分批止盈（+3R 卖一半，剩下的用宽跟踪）。评价指标改成"封顶 20R 后的期望"，避免被极端值误导。
-6. **每日扫描 + 研究日志**：做一个每天收盘后的脚本，输出当天新入池、观察中、可试仓的名单，以及公告摘要。你人工研究后记一笔"做 / 不做 + 理由"。几个月后就能评估人工研究是否真的有增益。量化规则负责找票、管风险，判断交给人。
-7. （长期）**退市股数据**：如果打算认真投入，可以考虑付费数据源（含退市股），消除幸存者偏差。
+1. **Insider buying (Form 4, transaction code P)**: executives buying with their own money on the open market during the watch period after a surge is the classic "insider endorsement" signal. The SEC has the data; it needs Form 4 XML parsing, only for filings by surging companies during their watch periods, so the volume is small.
+2. **13D / 13G institutional stakes**: 74 trades at +1.45R in 2024-26, but the earlier sample is negative, so it needs to be looked at together with item 1. Your PRME sample also includes a "big pharma takes a stake" case.
+3. **Fundamental inflection**: pull revenue growth, gross margin, and cash runway from SEC XBRL, to separate "the business is really improving" from "pure hype". Two conditions to look at: accelerating revenue YoY, and cash lasting 12+ months.
+4. **Portfolio-level simulation**: set risk per trade (e.g. 0.25% of the account), maximum concurrent positions, and maximum new trades per day, and compute the real equity curve. Only then can we judge whether "relying on a few big winners" is capturable in reality (whether you still have a position and capital when the big winner shows up).
+5. **Revisit exits**: the right tail matters (50-day trailing turned 2024-26 positive), but it's not stable yet. Try ATR trailing and partial take-profit (sell half at +3R, trail the rest loosely). Change the evaluation metric to "expectancy after capping at 20R" to avoid being misled by outliers.
+6. **Daily scan + research journal**: build a script that runs after each close and outputs the day's new watchlist entries, names under watch, and names ready to probe, plus a filings summary. After your manual research you log "take / pass + reason". After a few months we can evaluate whether manual research actually adds value. The quant rules find names and manage risk; judgment is left to the human.
+7. (Long term) **Delisted-stock data**: if you plan to invest seriously, consider a paid data source (including delisted stocks) to eliminate survivorship bias.
 
-建议先做 1 + 2 + 4：成本低、逻辑清楚，能回答"有没有能把彩票股和真趋势分开的信息"。
+I suggest doing 1 + 2 + 4 first: low cost, clear logic, and they answer "is there information that separates lottery stocks from real trends".

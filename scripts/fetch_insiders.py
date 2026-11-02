@@ -1,9 +1,9 @@
-"""拉内部人交易（Form 4）：只解析回测交易相关时间窗口内的申报。
+"""Fetch insider trades (Form 4): only parses filings within the time windows relevant to backtest trades.
 
-用法：python scripts/fetch_insiders.py --trades reports/data/trades_v3b_feat_staged.csv [--pre-days 10]
+Usage: python scripts/fetch_insiders.py --trades reports/data/trades_v3b_feat_staged.csv [--pre-days 10]
 
-1. 对交易涉及的公司拉 Form 4 列表（data/cache/form4_index.parquet）
-2. 只下载每笔交易 [异动日 - pre_days, 试仓信号日] 内申报的 Form 4，解析公开市场买卖（data/cache/form4_tx.parquet）
+1. Fetch the Form 4 lists for the companies in the trades (data/cache/form4_index.parquet)
+2. Download only the Form 4s filed within [surge date - pre_days, probe signal date] of each trade and parse open-market buys / sells (data/cache/form4_tx.parquet)
 """
 from __future__ import annotations
 

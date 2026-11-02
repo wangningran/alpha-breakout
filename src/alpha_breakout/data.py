@@ -1,9 +1,9 @@
-"""日线行情拉取（Yahoo Finance / yfinance），带本地 parquet 缓存。
+"""Daily price fetching (Yahoo Finance / yfinance) with a local parquet cache.
 
-缓存文件：data/cache/prices/<TICKER>.parquet，保存 Yahoo 原始字段
-（拆股调整后的 OHLC、Adj Close、Volume、Stock Splits）。
-- get_daily()：单支票，同一天内重复调用直接读缓存；refresh=True 强制重拉。
-- download_bulk()：全市场批量下载，已有缓存的跳过（除非 refresh）。
+Cache files: data/cache/prices/<TICKER>.parquet, storing the raw Yahoo fields
+(split-adjusted OHLC, Adj Close, Volume, Stock Splits).
+- get_daily(): single ticker; repeat calls on the same day read the cache; refresh=True forces a re-download.
+- download_bulk(): bulk download for the whole market; tickers already cached are skipped (unless refresh).
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _download(ticker: str, start: str | None = None) -> pd.DataFrame:
     df = yf.download(ticker, interval="1d", auto_adjust=False, actions=True,
                      progress=False, threads=False, **kw)
     if df is None or df.empty:
-        raise RuntimeError(f"yfinance 没有返回 {ticker} 的数据")
+        raise RuntimeError(f"yfinance returned no data for {ticker}")
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return _clean(df)
@@ -47,7 +47,7 @@ def _download(ticker: str, start: str | None = None) -> pd.DataFrame:
 
 def download_bulk(tickers, start: str = "2018-06-01", batch: int = 200,
                   refresh: bool = False, log=print) -> list[str]:
-    """批量下载并写缓存，返回成功的代码列表。"""
+    """Bulk download and write the cache; returns the list of tickers that succeeded."""
     import yfinance as yf
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def download_bulk(tickers, start: str = "2018-06-01", batch: int = 200,
         try:
             df = yf.download(chunk, start=start, interval="1d", auto_adjust=False, actions=True,
                              progress=False, threads=True, group_by="ticker")
-        except Exception as e:  # 整批失败就记一下，下一次运行会补
+        except Exception as e:  # log a failed batch; the next run fills it in
             log(f"[warn] batch {i}: {e}")
             continue
         got = set(df.columns.get_level_values(0)) if isinstance(df.columns, pd.MultiIndex) else set()
@@ -81,7 +81,7 @@ def load_raw(ticker: str) -> pd.DataFrame | None:
 
 def get_daily(ticker: str, start: str | None = None, end: str | None = None,
               refresh: bool = False) -> pd.DataFrame:
-    """返回 [start, end] 区间的日线（DatetimeIndex），见 adjust() 的字段说明。"""
+    """Return daily bars in [start, end] (DatetimeIndex); see adjust() for the fields."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(ticker)
     fresh = path.exists() and dt.date.fromtimestamp(path.stat().st_mtime) == dt.date.today()
@@ -100,10 +100,10 @@ def get_daily(ticker: str, start: str | None = None, end: str | None = None,
 
 
 def adjust(raw: pd.DataFrame) -> pd.DataFrame:
-    """输出字段：
-    - Open/High/Low/Close：复权价（拆股 + 分红），用来算收益和指标；
-    - Volume：拆股调整后的股数；
-    - RawClose：当时真实成交价（把拆股调整还原），用来做价格门槛和估算市值。
+    """Output fields:
+    - Open/High/Low/Close: adjusted prices (splits + dividends), used for returns and indicators;
+    - Volume: split-adjusted share count;
+    - RawClose: actual traded price at the time (split adjustment undone), used for price thresholds and market cap estimates.
     """
     factor = (raw["Adj Close"] / raw["Close"]).fillna(1.0)
     out = pd.DataFrame(index=raw.index)
@@ -111,7 +111,7 @@ def adjust(raw: pd.DataFrame) -> pd.DataFrame:
         out[col] = raw[col] * factor
     out["Volume"] = raw["Volume"]
     splits = raw["Stock Splits"].replace(0, np.nan).fillna(1.0) if "Stock Splits" in raw else pd.Series(1.0, raw.index)
-    # 某日之后所有拆股比例的乘积：真实价 = 拆股调整价 × 该乘积
+    # product of all split ratios after a given day: actual price = split-adjusted price x that product
     after = splits[::-1].cumprod()[::-1].shift(-1).fillna(1.0)
     out["RawClose"] = raw["Close"] * after
     return out
@@ -126,7 +126,7 @@ def get_benchmarks(start=None, end=None, refresh=False) -> dict[str, pd.DataFram
 
 
 def update_recent(tickers, period: str = "1mo", batch: int = 200, log=print) -> int:
-    """增量更新：拉最近一段行情，合并进已有缓存（新数据覆盖重叠日期）。返回更新的代码数。"""
+    """Incremental update: fetch recent bars and merge them into the existing cache (new data overwrites overlapping dates). Returns the number of tickers updated."""
     import yfinance as yf
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -149,7 +149,7 @@ def update_recent(tickers, period: str = "1mo", batch: int = 200, log=print) -> 
                 continue
             old = load_raw(t)
             if old is not None:
-                # 缓存里还没有的新拆股：Yahoo 会改写全部历史价格，这种情况直接整段重拉
+                # a new split not yet in the cache: Yahoo rewrites all historical prices, so re-download the whole range
                 split_days = new.index[new["Stock Splits"] > 0]
                 if any(d not in old.index or old.at[d, "Stock Splits"] == 0 for d in split_days):
                     try:
